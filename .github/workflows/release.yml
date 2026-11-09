@@ -35,10 +35,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: aarch64-apple-darwin, os: macos-14 }
-          - { target: x86_64-apple-darwin, os: macos-14 }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
           - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, zig: true }
-          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, zig: true }
+          # Native arm64 runner: zig's linker rejects rustc's --fix-cortex-a53-843419 here.
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, musl: true }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +54,8 @@ jobs:
         with: { version: 0.14.1 }
       - if: matrix.zig
         run: pip install --break-system-packages cargo-zigbuild==0.20.1 || cargo install --locked cargo-zigbuild --version 0.20.1
+      - if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
       - name: Build
         shell: bash
         run: |
@@ -62,7 +65,7 @@ jobs:
             cargo build --release --locked -p boba-server --target ${{ matrix.target }}
           fi
       - name: Smoke test
-        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-apple-darwin'
+        if: matrix.target != 'x86_64-apple-darwin'
         run: ./target/${{ matrix.target }}/release/boba-agent runner --help | head -3
       - run: scripts/package.sh ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
