@@ -1304,3 +1304,155 @@ async fn websocket_snapshot_and_live_logs() {
     assert!(saw_upsert, "board updates are broadcast");
     assert_eq!(seqs, vec![0, 1, 2, 3, 4]);
 }
+
+#[tokio::test]
+async fn profile_updates() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let (_, me) = srv.get(&member, "/auth/status").await;
+    assert!(boba_core::team::USER_AVATARS.contains(&me["me"]["avatar"].as_str().unwrap()));
+
+    let (s, v) = srv
+        .req(
+            &member,
+            "PATCH",
+            "/me",
+            Some(json!({"name": "  Mia ", "avatar": "golden_boba_avatar"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(
+        (v["name"].clone(), v["avatar"].clone()),
+        (json!("Mia"), json!("golden_boba_avatar"))
+    );
+    assert_eq!(
+        srv.req(&member, "PATCH", "/me", Some(json!({"avatar": "boba"})))
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    // Password change: needs the current one, signs out other devices only.
+    let other = client();
+    srv.post(
+        &other,
+        "/auth/login",
+        json!({"email": "m@test.io", "password": "password123"}),
+    )
+    .await;
+    assert_eq!(srv.get(&other, "/snapshot").await.0, StatusCode::OK);
+    let (s, _) = srv
+        .req(
+            &member,
+            "PATCH",
+            "/me",
+            Some(json!({"new_password": "brand new pw", "current_password": "nope nope"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, v) = srv
+        .req(
+            &member,
+            "PATCH",
+            "/me",
+            Some(json!({"new_password": "brand new pw", "current_password": "password123"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(srv.get(&member, "/snapshot").await.0, StatusCode::OK);
+    assert_eq!(
+        srv.get(&other, "/snapshot").await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (s, _) = srv
+        .post(
+            &client(),
+            "/auth/login",
+            json!({"email": "m@test.io", "password": "brand new pw"}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    // Unauthenticated.
+    assert_eq!(
+        srv.req(&client(), "PATCH", "/me", Some(json!({}))).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn notifications_reach_only_their_owner() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let tab = snap.tabs[0].id;
+    let dev = agent(&snap, "Boba Dev").id;
+    // Owner creates the ticket, the member runs it: member gets RunFinished,
+    // both get the review verdict (creator + runner), nobody gets their own action.
+    let (_, tk) = srv
+        .post(
+            &owner,
+            "/tickets",
+            json!({"tab_id": tab, "title": "Notify me"}),
+        )
+        .await;
+    let t: Id = serde_json::from_value(tk["id"].clone()).unwrap();
+    srv.post(
+        &member,
+        &format!("/tickets/{t}/assign"),
+        json!({"agent_id": dev}),
+    )
+    .await;
+    srv.until(&member, "done", |s| {
+        column_kind(s, ticket(s, t)) == ColumnKind::Done && all_idle(s)
+    })
+    .await;
+    let kinds = |s: &Snapshot| -> Vec<String> {
+        let mut k: Vec<String> = s
+            .notifications
+            .iter()
+            .map(|n| boba_server::db::enc(&n.kind))
+            .collect();
+        k.sort();
+        k
+    };
+    let m = srv.snapshot(&member).await;
+    assert_eq!(kinds(&m), vec!["review_verdict", "run_finished"]);
+    assert!(m
+        .notifications
+        .iter()
+        .all(|n| !n.read && n.ticket_id == Some(t)));
+    let o = srv.snapshot(&owner).await;
+    assert_eq!(kinds(&o), vec!["review_verdict"]);
+
+    // Role change -> account notification for the target only.
+    let member_id = m.me.as_ref().unwrap().id;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/users/{member_id}"),
+        Some(json!({"role": "viewer"})),
+    )
+    .await;
+    let (_, list) = srv.get(&member, "/notifications?limit=10").await;
+    assert_eq!(list[0]["kind"], "account");
+    assert_eq!(list.as_array().unwrap().len(), 3);
+
+    // Mark one read, then all.
+    let first: Id = serde_json::from_value(list[0]["id"].clone()).unwrap();
+    let (s, _) = srv
+        .post(&member, "/notifications/read", json!({"ids": [first]}))
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let m = srv.snapshot(&member).await;
+    assert_eq!(m.notifications.iter().filter(|n| !n.read).count(), 2);
+    srv.post(&member, "/notifications/read", json!({})).await;
+    let m = srv.snapshot(&member).await;
+    assert_eq!(m.notifications.iter().filter(|n| !n.read).count(), 0);
+    // Someone else's ids are ignored.
+    let o = srv.snapshot(&owner).await;
+    let theirs = o.notifications[0].id;
+    srv.post(&member, "/notifications/read", json!({"ids": [theirs]}))
+        .await;
+    assert!(!srv.snapshot(&owner).await.notifications[0].read);
+}

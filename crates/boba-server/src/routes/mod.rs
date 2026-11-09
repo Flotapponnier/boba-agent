@@ -2,6 +2,7 @@
 
 mod auth;
 mod board;
+mod team;
 mod work;
 
 use axum::routing::{get, patch, post};
@@ -59,6 +60,10 @@ pub fn api() -> Router<SharedState> {
         .route("/repos", post(board::create_repo))
         .route("/repos/{id}", axum::routing::delete(board::delete_repo))
         .route("/health", get(|| async { "ok" }))
+        // team
+        .route("/me", patch(team::update_me))
+        .route("/notifications", get(team::list_notifications))
+        .route("/notifications/read", post(team::mark_read))
         // connectors & speech (coordinator workstream)
         .route("/connectors", post(crate::connectors::create))
         .route(

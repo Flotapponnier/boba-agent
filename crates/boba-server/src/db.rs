@@ -1321,4 +1321,183 @@ impl Db {
             .map(Self::history_row)
             .collect()
     }
+
+    // ------------------------------------------------------------ notifications
+
+    pub async fn insert_notification(
+        &self,
+        n: &boba_core::team::Notification,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO notifications(id, user_id, kind, message, ticket_id, comment_id, run_id, job_id,
+               actor_user_id, actor_agent_id, read, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(n.id.to_string())
+        .bind(n.user_id.to_string())
+        .bind(enc(&n.kind))
+        .bind(&n.message)
+        .bind(s(n.ticket_id))
+        .bind(s(n.comment_id))
+        .bind(s(n.run_id))
+        .bind(s(n.job_id))
+        .bind(s(n.actor_user_id))
+        .bind(s(n.actor_agent_id))
+        .bind(n.read as i64)
+        .bind(ts(n.created_at))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    fn notification_row(row: &SqliteRow) -> anyhow::Result<boba_core::team::Notification> {
+        Ok(boba_core::team::Notification {
+            id: id(row, "id")?,
+            user_id: id(row, "user_id")?,
+            kind: dec(&row.try_get::<String, _>("kind")?)?,
+            message: row.try_get("message")?,
+            ticket_id: opt_id(row, "ticket_id")?,
+            comment_id: opt_id(row, "comment_id")?,
+            run_id: opt_id(row, "run_id")?,
+            job_id: opt_id(row, "job_id")?,
+            actor_user_id: opt_id(row, "actor_user_id")?,
+            actor_agent_id: opt_id(row, "actor_agent_id")?,
+            read: row.try_get::<i64, _>("read")? != 0,
+            created_at: time(row, "created_at")?,
+        })
+    }
+
+    /// Newest first, optional `before` cursor (ISO timestamp, exclusive).
+    pub async fn notifications(
+        &self,
+        user: Id,
+        before: Option<&str>,
+        limit: u32,
+    ) -> anyhow::Result<Vec<boba_core::team::Notification>> {
+        let before = before
+            .map(|b| parse_ts(b).map(ts).unwrap_or_else(|_| b.to_string()))
+            .unwrap_or_else(|| "9999".into());
+        sqlx::query(
+            "SELECT * FROM notifications WHERE user_id = ? AND created_at < ?
+             ORDER BY created_at DESC, id DESC LIMIT ?",
+        )
+        .bind(user.to_string())
+        .bind(before)
+        .bind(limit.clamp(1, 200) as i64)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(Self::notification_row)
+        .collect()
+    }
+
+    /// Snapshot view: every unread one plus the 50 latest (capped at 500).
+    pub async fn snapshot_notifications(
+        &self,
+        user: Id,
+    ) -> anyhow::Result<Vec<boba_core::team::Notification>> {
+        sqlx::query(
+            "SELECT * FROM notifications WHERE user_id = ?1
+               AND (read = 0 OR id IN (SELECT id FROM notifications WHERE user_id = ?1
+                                       ORDER BY created_at DESC LIMIT 50))
+             ORDER BY created_at DESC LIMIT 500",
+        )
+        .bind(user.to_string())
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(Self::notification_row)
+        .collect()
+    }
+
+    /// Mark some (or all) of a user's notifications read. Returns the ids changed.
+    pub async fn mark_read(&self, user: Id, ids: Option<&[Id]>) -> anyhow::Result<Vec<Id>> {
+        let rows: Vec<String> =
+            match ids {
+                None => sqlx::query_scalar(
+                    "UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0 RETURNING id",
+                )
+                .bind(user.to_string())
+                .fetch_all(&self.pool)
+                .await?,
+                Some(ids) => {
+                    let mut out = Vec::new();
+                    for chunk in ids.chunks(200) {
+                        let mut qb = sqlx::QueryBuilder::new(
+                            "UPDATE notifications SET read = 1 WHERE user_id = ",
+                        );
+                        qb.push_bind(user.to_string())
+                            .push(" AND read = 0 AND id IN (");
+                        let mut sep = qb.separated(", ");
+                        for i in chunk {
+                            sep.push_bind(i.to_string());
+                        }
+                        qb.push(") RETURNING id");
+                        out.extend(
+                            qb.build_query_scalar::<String>()
+                                .fetch_all(&self.pool)
+                                .await?,
+                        );
+                    }
+                    out
+                }
+            };
+        rows.iter()
+            .map(|s| Id::parse_str(s).map_err(Into::into))
+            .collect()
+    }
+
+    pub async fn notification(
+        &self,
+        nid: Id,
+    ) -> anyhow::Result<Option<boba_core::team::Notification>> {
+        sqlx::query("SELECT * FROM notifications WHERE id = ?")
+            .bind(nid.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .as_ref()
+            .map(Self::notification_row)
+            .transpose()
+    }
+
+    // ------------------------------------------------------------ profile
+
+    pub async fn update_profile(&self, uid: Id, name: &str, avatar: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE users SET name = ?, avatar = ? WHERE id = ?")
+            .bind(name)
+            .bind(avatar)
+            .bind(uid.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn password_hash(&self, uid: Id) -> anyhow::Result<Option<String>> {
+        Ok(
+            sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
+                .bind(uid.to_string())
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten(),
+        )
+    }
+
+    pub async fn set_password(&self, uid: Id, hash: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+            .bind(hash)
+            .bind(uid.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Sign the user out everywhere except `keep` (session token hash). Returns the removed hashes.
+    pub async fn delete_other_sessions(&self, uid: Id, keep: &str) -> anyhow::Result<Vec<String>> {
+        Ok(sqlx::query_scalar(
+            "DELETE FROM sessions WHERE user_id = ? AND token_hash <> ? RETURNING token_hash",
+        )
+        .bind(uid.to_string())
+        .bind(keep)
+        .fetch_all(&self.pool)
+        .await?)
+    }
 }

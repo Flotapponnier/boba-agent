@@ -291,8 +291,13 @@ impl AppState {
                 ..Default::default()
             })
             .await?;
+        let notifications = match &me {
+            Some(u) => db.snapshot_notifications(u.id).await?,
+            None => Vec::new(),
+        };
         Ok(Snapshot {
             me,
+            notifications,
             tabs,
             agents,
             tickets,
@@ -307,8 +312,6 @@ impl AppState {
             // Filled once the scheduler lands.
             jobs: Vec::new(),
             connectors: crate::connectors::list(&self.db).await?,
-            // Filled once comments & notifications land.
-            notifications: Vec::new(),
         })
     }
 }

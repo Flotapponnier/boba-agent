@@ -30,6 +30,10 @@ pub struct Hub {
     revoked: broadcast::Sender<String>,
     runs: Mutex<HashMap<Id, RunChannel>>,
     presence: Mutex<HashMap<ConnId, Presence>>,
+    /// Every open socket and its user, for messages meant for one user only.
+    conns: Mutex<HashMap<ConnId, (Id, ConnTx)>>,
+    /// "Send yourself a fresh snapshot" (state that is not an Entity changed, e.g. settings).
+    resync: broadcast::Sender<()>,
     next_conn: std::sync::atomic::AtomicU64,
 }
 
@@ -43,17 +47,46 @@ impl Hub {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(1024);
         let (revoked, _) = broadcast::channel(64);
+        let (resync, _) = broadcast::channel(16);
         Self {
             tx,
             revoked,
             runs: Mutex::new(HashMap::new()),
             presence: Mutex::new(HashMap::new()),
+            conns: Mutex::new(HashMap::new()),
+            resync,
             next_conn: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<ServerMessage> {
         self.tx.subscribe()
+    }
+
+    pub fn register_conn(&self, conn: ConnId, user: Id, tx: ConnTx) {
+        if let Ok(mut c) = self.conns.lock() {
+            c.insert(conn, (user, tx));
+        }
+    }
+
+    /// Deliver to every socket of `user` (and nobody else).
+    pub fn send_to_user(&self, user: Id, msg: ServerMessage) {
+        if let Ok(c) = self.conns.lock() {
+            for (uid, tx) in c.values() {
+                if *uid == user {
+                    let _ = tx.try_send(msg.clone());
+                }
+            }
+        }
+    }
+
+    /// Ask every socket to send its own user a fresh snapshot.
+    pub fn request_resync(&self) {
+        let _ = self.resync.send(());
+    }
+
+    pub fn resyncs(&self) -> broadcast::Receiver<()> {
+        self.resync.subscribe()
     }
 
     pub fn revoke_session(&self, token_hash: &str) {
@@ -134,6 +167,9 @@ impl Hub {
         }
         if let Ok(mut p) = self.presence.lock() {
             p.remove(&conn);
+        }
+        if let Ok(mut c) = self.conns.lock() {
+            c.remove(&conn);
         }
         self.broadcast_presence();
     }

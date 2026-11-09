@@ -35,6 +35,7 @@ pub struct SettingsPatch {
     name: Option<String>,
     theme: Option<String>,
     music_enabled_by_default: Option<bool>,
+    speech: Option<SpeechProvider>,
 }
 
 pub async fn update_settings(
@@ -57,14 +58,21 @@ pub async fn update_settings(
     if let Some(m) = p.music_enabled_by_default {
         s.music_enabled_by_default = m;
     }
-    state.db.save_workspace_settings(&s).await?;
-    // Settings are not an Entity: clients pick them up via a fresh snapshot on resync;
-    // a full snapshot push keeps every screen in sync right away.
-    if let Ok(snap) = state.snapshot(None).await {
-        state
-            .hub
-            .broadcast(boba_core::event::ServerMessage::Snapshot { state: snap });
+    if let Some(sp) = p.speech {
+        if let SpeechProvider::Whisper { url } = &sp {
+            let u = url.trim();
+            if !(u.starts_with("http://") || u.starts_with("https://")) || u.len() > 500 {
+                return Err(AppError::bad(
+                    "the Whisper URL must start with http:// or https://",
+                ));
+            }
+        }
+        s.speech = sp;
     }
+    state.db.save_workspace_settings(&s).await?;
+    // Settings are not an Entity: every socket sends its own user a fresh snapshot
+    // (a shared one would carry the wrong `me` and someone else's notifications).
+    state.hub.request_resync();
     Ok(Json(s))
 }
 
