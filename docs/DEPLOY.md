@@ -30,6 +30,12 @@ Agent never lets a subscription run someone else's work. Teammates can connect t
 
 For subscription mode, log in once on the host with `claude` (the container reuses `~/.claude`).
 
+Subscription mode needs both variables: `BOBA_CLAUDE_AUTH=subscription` and
+`BOBA_LOCAL_RUNNER_OWNER=<the email of your Boba account>`. The server refuses to start in
+subscription mode without an owner, and the built-in Claude runner then only takes runs that
+owner starts (drag, mention, follow-up, auto review of their own work, jobs they run). Everyone
+else's runs go to the simulated runner and are labelled as such.
+
 ## 3. HTTPS
 
 Put a reverse proxy in front and keep `BOBA_BIND=127.0.0.1`. Caddy:
