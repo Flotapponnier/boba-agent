@@ -3766,3 +3766,46 @@ async fn github_app_manifest_as_json_for_the_spa() {
     assert_eq!(v["manifest"]["default_permissions"]["contents"], "write");
     assert!(v["warnings"][0].as_str().unwrap().contains("local address"));
 }
+
+#[tokio::test]
+async fn concierge_uses_the_askers_time_zone() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let snap = srv.snapshot(&owner).await;
+    let pinky = agent(&snap, "Pinky SEO").id;
+    let ask = |tz: &str| {
+        json!({"text": "every monday at 9 audit the docs", "tab_id": null, "ticket_id": null,
+                                "agent_id": null, "voice": false, "timezone": tz})
+    };
+    let (_, good) = srv.post(&owner, "/command", ask("Europe/Paris")).await;
+    let (_, bad) = srv.post(&owner, "/command", ask("Mars/Olympus")).await;
+    srv.until(&owner, "commands done", all_idle).await;
+    let specs = srv.runner.specs();
+    let tz_of = |id: &Value| {
+        specs
+            .iter()
+            .find(|s| json!(s.run_id) == *id)
+            .unwrap()
+            .command
+            .as_ref()
+            .unwrap()
+            .timezone
+            .clone()
+    };
+    assert_eq!(tz_of(&good["id"]).as_deref(), Some("Europe/Paris"));
+    assert_eq!(tz_of(&bad["id"]), None, "unknown zones are dropped");
+
+    // A cron quest in the plan without a zone gets the asker's.
+    let (s, results) = srv
+        .post(&owner, "/command/execute", json!({"run_id": good["id"], "actions": [{"action": "create_job", "job": {
+            "name": "Monday audit", "description": null, "icon": null, "agent_id": pinky, "prompt": "Audit the docs",
+            "schedule": {"type": "cron", "expr": "0 9 * * 1", "timezone": ""}, "output": "report",
+            "enabled": null, "repo_id": null, "tab_id": null, "skip_if_running": null}}]}))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{results}");
+    assert_eq!(results[0]["ok"], true, "{results}");
+    assert_eq!(
+        results[0]["entity"]["data"]["schedule"]["timezone"],
+        "Europe/Paris"
+    );
+}

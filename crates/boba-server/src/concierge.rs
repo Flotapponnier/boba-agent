@@ -116,6 +116,7 @@ struct CommandRow {
     tab_id: Option<Id>,
     ticket_id: Option<Id>,
     agent_id: Option<Id>,
+    timezone: Option<String>,
     executed: bool,
 }
 
@@ -136,6 +137,7 @@ async fn command_row(state: &SharedState, run_id: Id) -> anyhow::Result<Option<C
         tab_id: opt("tab_id")?,
         ticket_id: opt("ticket_id")?,
         agent_id: opt("agent_id")?,
+        timezone: r.try_get("timezone")?,
         executed: r.try_get::<i64, _>("executed")? != 0,
     }))
 }
@@ -155,7 +157,7 @@ pub async fn spec(state: &SharedState, run: &Run) -> AppResult<boba_core::runner
         text: row.text,
         voice: row.voice,
         // Persisted with the command row by the server workstream (follow-up).
-        timezone: None,
+        timezone: row.timezone,
         user_name,
         tab_id: row.tab_id,
         ticket_id: row.ticket_id,
@@ -216,8 +218,8 @@ pub async fn command(
     // The Concierge serves everyone at once: its runs never make it "busy".
     state.db.insert_run(&run, None, None, None).await?;
     sqlx::query(
-        "INSERT INTO command_runs(run_id, user_id, text, voice, tab_id, ticket_id, agent_id, created_at)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO command_runs(run_id, user_id, text, voice, tab_id, ticket_id, agent_id,
+           timezone, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(run.id.to_string())
     .bind(me.id.to_string())
@@ -226,6 +228,7 @@ pub async fn command(
     .bind(req.tab_id.map(|i| i.to_string()))
     .bind(req.ticket_id.map(|i| i.to_string()))
     .bind(req.agent_id.map(|i| i.to_string()))
+    .bind(valid_timezone(req.timezone.as_deref()))
     .bind(ts(Utc::now()))
     .execute(&state.db.pool)
     .await?;
@@ -419,7 +422,12 @@ pub async fn execute(
     }
     let mut results = Vec::with_capacity(req.actions.len());
     for action in req.actions {
-        let r = run_action(&state, &user, action).await;
+        let r = run_action(
+            &state,
+            &user,
+            with_timezone(action, row.timezone.as_deref()),
+        )
+        .await;
         results.push(match r {
             Ok(entity) => ActionResult {
                 ok: true,
@@ -451,6 +459,38 @@ pub async fn execute(
         )
         .await;
     Ok(Json(results))
+}
+
+/// A known IANA zone ("Europe/Paris"), else None.
+pub fn valid_timezone(tz: Option<&str>) -> Option<String> {
+    let tz = tz?.trim();
+    tz.parse::<chrono_tz::Tz>().ok().map(|_| tz.to_string())
+}
+
+/// A cron schedule in the plan without a time zone means the asker's.
+fn with_timezone(action: CommandAction, tz: Option<&str>) -> CommandAction {
+    use boba_core::automation::Schedule;
+    let Some(tz) = tz else { return action };
+    let fill = |s: &mut Schedule| {
+        if let Schedule::Cron { timezone, .. } = s {
+            if timezone.trim().is_empty() {
+                *timezone = tz.to_string();
+            }
+        }
+    };
+    match action {
+        CommandAction::CreateJob { mut job } => {
+            fill(&mut job.schedule);
+            CommandAction::CreateJob { job }
+        }
+        CommandAction::UpdateJob { job_id, mut patch } => {
+            if let Some(s) = patch.schedule.as_mut() {
+                fill(s);
+            }
+            CommandAction::UpdateJob { job_id, patch }
+        }
+        other => other,
+    }
 }
 
 /// One confirmed action, through the same handlers (and permission checks) as the UI.
