@@ -2,7 +2,7 @@
 //!
 //! It walks a scripted run (explore, plan, edit, test, commit, PR) whose files, commands and
 //! outputs are derived from the ticket, streaming the same [`RunUpdate`]s the real runner
-//! does: every [`LogKind`], `tool_use` / `tool_result` pairs with real Claude Code shapes,
+//! does: every `LogKind`, `tool_use` / `tool_result` pairs with real Claude Code shapes,
 //! progress + activity, cumulative usage, a PR, and for review runs a `boba-verdict`.
 //!
 //! Everything is seeded from the run id, so a given run replays identically.
@@ -15,19 +15,18 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use boba_core::automation::TicketSource;
 use boba_core::runner::{RunOutcome, RunSpec, RunUpdate, TicketSpec};
 use boba_core::{Id, PermissionMode, ReviewVerdict, RunKind, RunStatus, Skill};
 use serde_json::json;
-use tokio::sync::{mpsc, Semaphore};
 use tokio::time::Instant;
 
-use crate::emit::{self, Closed, Emitter};
+use crate::emit::{self, Emitter};
+use crate::table::{Control, ControlRx, RunTable, Stop};
 use crate::util::{slugify, ticket_branch, Rng};
 use crate::{Runner, UpdateTx};
 
@@ -84,16 +83,9 @@ impl DemoConfig {
     }
 }
 
-enum Control {
-    Cancel,
-    Message(String),
-    Permission { request_id: String, allow: bool },
-}
-
 struct Inner {
     cfg: DemoConfig,
-    runs: Mutex<HashMap<Id, mpsc::UnboundedSender<Control>>>,
-    slots: Arc<Semaphore>,
+    table: Arc<RunTable>,
     next_pr: AtomicI64,
 }
 
@@ -105,13 +97,12 @@ pub struct DemoRunner {
 
 impl DemoRunner {
     pub fn new(cfg: DemoConfig) -> Self {
-        let slots = Arc::new(Semaphore::new(cfg.max_concurrent_runs.max(1) as usize));
+        let table = Arc::new(RunTable::new(cfg.max_concurrent_runs));
         let next_pr = AtomicI64::new(cfg.first_pr_number);
         Self {
             inner: Arc::new(Inner {
                 cfg,
-                runs: Mutex::new(HashMap::new()),
-                slots,
+                table,
                 next_pr,
             }),
         }
@@ -119,20 +110,7 @@ impl DemoRunner {
 
     /// Runs currently queued or executing.
     pub fn active_runs(&self) -> usize {
-        self.inner.runs.lock().map(|r| r.len()).unwrap_or(0)
-    }
-
-    fn control(&self, run_id: Id, c: Control) -> anyhow::Result<()> {
-        let runs = self
-            .inner
-            .runs
-            .lock()
-            .map_err(|_| anyhow!("runner state poisoned"))?;
-        let tx = runs
-            .get(&run_id)
-            .ok_or_else(|| anyhow!("run {run_id} is not active"))?;
-        tx.send(c)
-            .map_err(|_| anyhow!("run {run_id} already finished"))
+        self.inner.table.len()
     }
 }
 
@@ -151,72 +129,19 @@ impl Runner for DemoRunner {
     }
 
     async fn start(&self, spec: RunSpec, updates: UpdateTx) -> anyhow::Result<()> {
-        let run_id = spec.run_id;
-        let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
-        {
-            let mut runs = self
-                .inner
-                .runs
-                .lock()
-                .map_err(|_| anyhow!("runner state poisoned"))?;
-            if runs.contains_key(&run_id) {
-                bail!("run {run_id} is already active");
-            }
-            runs.insert(run_id, ctl_tx);
-        }
         let inner = self.inner.clone();
-        tokio::spawn(async move {
-            let mut ctl_rx = ctl_rx;
-            let em = Emitter::new(run_id, updates);
-            // Wait for a free slot (held until Finished is sent); cancel works while queued.
-            let slots = inner.slots.clone();
-            let permit = loop {
-                tokio::select! {
-                    p = slots.clone().acquire_owned() => break p.ok(),
-                    c = ctl_rx.recv() => match c {
-                        None | Some(Control::Cancel) => break None,
-                        Some(_) => tracing::debug!(%run_id, "ignoring control message for a queued run"),
-                    },
-                }
-            };
-            let joined = match &permit {
-                None => Ok(Err(Stop::Cancelled)),
-                Some(_) => {
-                    let script_inner = inner.clone();
-                    let script_em = em.clone();
-                    // The script runs in its own task so a panic still yields a Finished.
-                    tokio::spawn(
-                        async move { run_script(script_inner, spec, script_em, ctl_rx).await },
-                    )
-                    .await
-                }
-            };
-            let outcome = match joined {
-                Ok(Ok(outcome)) => Some(outcome),
-                Ok(Err(Stop::Cancelled)) => {
-                    let _ = em.system("Run cancelled").await;
-                    Some(emit::outcome(RunStatus::Cancelled))
-                }
-                Ok(Err(Stop::Closed)) => None,
-                Err(e) => Some(emit::failed(format!("demo runner crashed: {e}"))),
-            };
-            if let Ok(mut runs) = inner.runs.lock() {
-                runs.remove(&run_id);
-            }
-            if let Some(outcome) = outcome {
-                let _ = em.finished(outcome).await;
-            }
-            drop(permit);
-        });
-        Ok(())
+        let em = Emitter::new(spec.run_id, updates);
+        self.inner.table.spawn(spec.run_id, em, move |em, rx| {
+            run_script(inner, spec, em, rx)
+        })
     }
 
     async fn cancel(&self, run_id: Id) -> anyhow::Result<()> {
-        self.control(run_id, Control::Cancel)
+        self.inner.table.send(run_id, Control::Cancel)
     }
 
     async fn send_message(&self, run_id: Id, text: String) -> anyhow::Result<()> {
-        self.control(run_id, Control::Message(text))
+        self.inner.table.send(run_id, Control::Message(text))
     }
 
     async fn answer_permission(
@@ -225,7 +150,9 @@ impl Runner for DemoRunner {
         request_id: String,
         allow: bool,
     ) -> anyhow::Result<()> {
-        self.control(run_id, Control::Permission { request_id, allow })
+        self.inner
+            .table
+            .send(run_id, Control::Permission { request_id, allow })
     }
 
     async fn discover_skills(
@@ -244,23 +171,11 @@ impl Runner for DemoRunner {
 
 // ------------------------------------------------------------------ script machinery
 
-#[derive(Debug)]
-enum Stop {
-    Cancelled,
-    Closed,
-}
-
-impl From<Closed> for Stop {
-    fn from(_: Closed) -> Self {
-        Stop::Closed
-    }
-}
-
 type Step<T = ()> = Result<T, Stop>;
 
 struct Ctx {
     em: Emitter,
-    rx: mpsc::UnboundedReceiver<Control>,
+    rx: ControlRx,
     speed: f64,
     rng: Rng,
     tool_seq: u32,
@@ -385,7 +300,7 @@ async fn run_script(
     inner: Arc<Inner>,
     spec: RunSpec,
     em: Emitter,
-    rx: mpsc::UnboundedReceiver<Control>,
+    rx: ControlRx,
 ) -> Step<RunOutcome> {
     let mut ctx = Ctx {
         em,
@@ -1285,7 +1200,7 @@ async fn review(
     })
 }
 
-mod concierge;
+pub(crate) mod concierge;
 mod job;
 
 #[cfg(test)]

@@ -40,7 +40,8 @@ pub(super) async fn run(spec: &RunSpec, ctx: &mut Ctx) -> Step<RunOutcome> {
     ctx.spend(4_000, 120).await?;
     ctx.em.progress(0.6, "Matching names on the board").await?;
     ctx.pause(600).await?;
-    let plan = plan(&cmd.text, &cmd.board_digest, ctx.rng.next_u64());
+    let digest = with_context(&cmd);
+    let plan = plan(&cmd.text, &digest, ctx.rng.next_u64());
     let block = serde_json::to_string_pretty(&plan).unwrap_or_default();
     let reply = plan["question"]
         .as_str()
@@ -57,6 +58,31 @@ pub(super) async fn run(spec: &RunSpec, ctx: &mut Ctx) -> Step<RunOutcome> {
         plan: Some(plan),
         ..emit::outcome(RunStatus::Succeeded)
     })
+}
+
+/// The digest with `context` filled from `CommandSpec` (preferred over the legacy
+/// `board_digest.context`).
+pub(crate) fn with_context(cmd: &boba_core::runner::CommandSpec) -> Value {
+    let mut d = cmd.board_digest.clone();
+    if !d.is_object() {
+        d = json!({});
+    }
+    let mut ctx = d
+        .get("context")
+        .cloned()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    for (k, v) in [
+        ("tab_id", cmd.tab_id),
+        ("ticket_id", cmd.ticket_id),
+        ("agent_id", cmd.agent_id),
+    ] {
+        if let Some(id) = v {
+            ctx[k] = json!(id);
+        }
+    }
+    d["context"] = ctx;
+    d
 }
 
 #[derive(Debug, Clone)]

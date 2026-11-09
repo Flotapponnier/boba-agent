@@ -179,7 +179,8 @@ pub fn first_line(s: &str, max: usize) -> String {
     }
 }
 
-fn truncate_lines(s: &str, max_lines: usize) -> String {
+/// Keep the first `max_lines` lines and say how many were cut.
+pub fn truncate_lines(s: &str, max_lines: usize) -> String {
     let total = s.lines().count();
     if total <= max_lines {
         return s.to_string();
