@@ -872,6 +872,9 @@ impl Db {
             created_at: time(row, "created_at")?,
             updated_at: time(row, "updated_at")?,
             source: serde_json::from_str(&row.try_get::<String, _>("source")?).unwrap_or_default(),
+            // Maintained by the comments feature (server workstream).
+            comment_count: 0,
+            open_thread_count: 0,
         })
     }
 

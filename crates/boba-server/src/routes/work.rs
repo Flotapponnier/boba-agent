@@ -288,6 +288,9 @@ pub async fn create_ticket(
         created_at: now,
         updated_at: now,
         source: TicketSource::Manual,
+        // Maintained by the comments feature (server workstream).
+        comment_count: 0,
+        open_thread_count: 0,
     };
     state.db.save_ticket(&ticket).await?;
     state.upsert(Entity::Ticket(ticket.clone()));
