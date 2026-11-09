@@ -25,6 +25,8 @@ export interface SocketHandle {
 export interface Transport {
   readonly mock: boolean;
   request<T>(method: string, path: string, body?: unknown): Promise<T>;
+  /** Raw body upload (audio for speech-to-text). */
+  upload<T>(path: string, body: Blob): Promise<T>;
   openSocket(h: SocketHandlers): SocketHandle;
 }
 
@@ -57,6 +59,21 @@ export const httpTransport: Transport = {
       const e = json as { error?: string; code?: string } | undefined;
       throw new ApiFailure(res.status, e?.error ?? (text || res.statusText), e?.code);
     }
+    return json as T;
+  },
+  async upload<T>(path: string, body: Blob): Promise<T> {
+    const res = await fetch(apiUrl(path), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': body.type || 'application/octet-stream' }, body }).catch(() => {
+      throw new ApiFailure(0, 'Cannot reach the Boba server', 'network');
+    });
+    const text = await res.text();
+    const json = (() => {
+      try {
+        return text ? JSON.parse(text) : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    if (!res.ok) throw new ApiFailure(res.status, json?.error ?? (text || res.statusText), json?.code);
     return json as T;
   },
   openSocket(h: SocketHandlers): SocketHandle {

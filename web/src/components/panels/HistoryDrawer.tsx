@@ -44,6 +44,7 @@ export function HistoryDrawer() {
             <option value="runs">Runs & PRs</option>
             <option value="reviews">Reviews</option>
             <option value="agents">Agents & levels</option>
+            <option value="automation">Quests, sync & concierge</option>
             <option value="team">Team & workspace</option>
           </select>
           <select value={tab} onChange={(e) => setTab(e.target.value)} aria-label="Tab">

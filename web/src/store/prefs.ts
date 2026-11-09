@@ -12,6 +12,7 @@ export interface Prefs {
   lastTab: string | null;
   tavernCollapsed: boolean;
   demoBots: boolean;
+  speakReplies: boolean;
 }
 
 const KEY = 'boba-prefs-v1';
@@ -24,6 +25,7 @@ const defaults: Prefs = {
   lastTab: null,
   tavernCollapsed: false,
   demoBots: true,
+  speakReplies: false,
 };
 
 function load(): Prefs {

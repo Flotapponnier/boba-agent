@@ -22,7 +22,7 @@ import type {
   WorkspaceSettings,
   WorkspaceStats,
 } from '../api/types';
-import { fxBus, toast } from './bus';
+import { fxBus, planBus, toast } from './bus';
 
 export type ConnState = 'idle' | 'connecting' | 'online' | 'offline';
 
@@ -141,6 +141,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     set((st) => {
       const k = KEY[item.entity];
       const data = item.data as { id: string };
+      if (item.entity === 'job') {
+        const prev = st.jobs[item.data.id];
+        if (prev && item.data.runs_count > prev.runs_count) queueMicrotask(() => fxBus.emit({ fx: 'quest_done', job_id: item.data.id }));
+      }
       const patch: Partial<BoardState> = { [k]: { ...st[k], [data.id]: data } } as Partial<BoardState>;
       if (item.entity === 'user' && st.me && st.me.id === data.id) patch.me = item.data as User;
       return patch;
@@ -196,6 +200,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
         break;
       case 'presence':
         set({ presence: msg.users });
+        break;
+      case 'command_plan':
+        planBus.emit(msg.plan);
         break;
       case 'error':
         toast(msg.message, 'bad');

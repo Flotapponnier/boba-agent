@@ -10,6 +10,12 @@ import { useCan, useOpenTicketCount, useTabs } from '../store/selectors';
 import { useBoard } from '../store/store';
 import { useUi } from '../store/ui';
 
+const PLACES = [
+  { view: 'quests', icon: '📜', label: 'Quests', key: 'Q' },
+  { view: 'integrations', icon: '🔗', label: 'Repos', key: 'I' },
+  { view: 'portals', icon: '🌀', label: 'Portals', key: 'P' },
+] as const;
+
 function TabButton({ id, active }: { id: string; active: boolean }) {
   const tab = useBoard((s) => s.tabs[id]);
   const count = useOpenTicketCount(id);
@@ -160,13 +166,29 @@ export function Header({ activeTab, onLoggedOut }: { activeTab: string | null; o
       <nav className="tab-bar" aria-label="Boards">
         <div className="tabs" role="tablist">
           {tabs.map((t) => (
-            <TabButton key={t.id} id={t.id} active={t.id === activeTab} />
+            <TabButton key={t.id} id={t.id} active={ui.view === 'board' && t.id === activeTab} />
           ))}
           {canManage && (
             <button className="tab" onClick={() => ui.show({ kind: 'tab-new' })} aria-label="New tab" title="New tab">
               +
             </button>
           )}
+          <span className="tab-sep" aria-hidden="true" />
+          {PLACES.map((p) => (
+            <button
+              key={p.view}
+              role="tab"
+              aria-selected={ui.view === p.view}
+              className={`tab place ${ui.view === p.view ? 'active' : ''}`}
+              onClick={() => ui.setView(ui.view === p.view ? 'board' : p.view)}
+              title={`${p.label} (${p.key})`}
+            >
+              <span className="ico" aria-hidden="true">
+                {p.icon}
+              </span>
+              {p.label}
+            </button>
+          ))}
         </div>
       </nav>
       <div className="top-spacer" />
@@ -197,6 +219,12 @@ export function Header({ activeTab, onLoggedOut }: { activeTab: string | null; o
             + Agent
           </button>
         )}
+        <button className="btn icon cmd-btn" onClick={() => ui.setCommand({ open: true })} title="Command bar (⌘K / Ctrl+K)" aria-label="Command bar">
+          ⌘K
+        </button>
+        <button className="btn icon" onClick={() => ui.setCommand({ open: true, voice: true })} title="Talk to the Concierge (hold Space)" aria-label="Voice command">
+          🎙
+        </button>
         <button className="btn icon" onClick={() => ui.open(ui.panel?.kind === 'history' ? null : { kind: 'history' })} title="History (H)" aria-label="History">
           📜
         </button>

@@ -140,6 +140,7 @@ export const TicketCard = memo(function TicketCard({ ticket, run, column, canEdi
   const picked = useUi((u) => u.picked);
   const open = useUi((u) => u.open);
   const pick = useUi((u) => u.pick);
+  const spot = useUi((u) => u.spotlight === ticket.id);
   const [landed, setLanded] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver, active } = useSortable({
     id: `t:${ticket.id}`,
@@ -172,6 +173,7 @@ export const TicketCard = memo(function TicketCard({ ticket, run, column, canEdi
   return (
     <div
       ref={setNodeRef}
+      className={spot ? 'spotlight' : undefined}
       style={{ transform: CSS.Translate.toString(transform), transition, display: hidden ? 'none' : undefined }}
       {...attributes}
       {...listeners}

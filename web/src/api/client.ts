@@ -29,6 +29,21 @@ import type {
   User,
   Role,
   WorkspaceSettings,
+  ActionResult,
+  CommandAction,
+  CommandRequest,
+  Connector,
+  ConnectorTestResult,
+  CreateConnector,
+  CreateJob,
+  Job,
+  Schedule,
+  SchedulePreview,
+  SyncReport,
+  Transcript,
+  UpdateConnector,
+  UpdateJob,
+  UpdateRepo,
 } from './types';
 import { httpTransport, type Transport } from './transport';
 
@@ -91,4 +106,22 @@ export const api = {
 
   createRepo: (b: CreateRepo) => req<Repo>('POST', '/api/repos', b),
   deleteRepo: (id: string) => req<void>('DELETE', `/api/repos/${id}`),
+  updateRepo: (id: string, b: Partial<UpdateRepo>) => req<Repo>('PATCH', `/api/repos/${id}`, b),
+  syncRepo: (id: string) => req<SyncReport>('POST', `/api/repos/${id}/sync`),
+
+  createConnector: (b: CreateConnector) => req<Connector>('POST', '/api/connectors', b),
+  updateConnector: (id: string, b: Partial<UpdateConnector>) => req<Connector>('PATCH', `/api/connectors/${id}`, b),
+  deleteConnector: (id: string) => req<void>('DELETE', `/api/connectors/${id}`),
+  testConnector: (id: string) => req<ConnectorTestResult>('POST', `/api/connectors/${id}/test`),
+
+  createJob: (b: CreateJob) => req<Job>('POST', '/api/jobs', b),
+  updateJob: (id: string, b: Partial<UpdateJob>) => req<Job>('PATCH', `/api/jobs/${id}`, b),
+  deleteJob: (id: string) => req<void>('DELETE', `/api/jobs/${id}`),
+  runJob: (id: string) => req<Run>('POST', `/api/jobs/${id}/run`),
+  jobRuns: (id: string) => req<Run[]>('GET', `/api/jobs/${id}/runs`),
+  previewSchedule: (s: Schedule) => req<SchedulePreview>('POST', '/api/jobs/preview-schedule', s),
+
+  command: (b: CommandRequest) => req<Run>('POST', '/api/command', b),
+  executeCommand: (runId: string, actions: CommandAction[]) => req<ActionResult[]>('POST', '/api/command/execute', { run_id: runId, actions }),
+  transcribe: (audio: Blob) => transport.upload<Transcript>('/api/speech/transcribe', audio),
 };

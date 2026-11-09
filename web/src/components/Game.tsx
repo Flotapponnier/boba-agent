@@ -41,6 +41,11 @@ import { HistoryDrawer } from './panels/HistoryDrawer';
 import { SkillsDrawer } from './panels/SkillsDrawer';
 import { TicketPanel } from './panels/TicketPanel';
 import { Tavern } from './tavern/Tavern';
+import { CommandBar } from './command/CommandBar';
+import { Integrations } from './integrations/Integrations';
+import { PortalEditor, Portals } from './integrations/Portals';
+import { QuestBoard, QuestPanel } from './quests/QuestBoard';
+import { QuestEditor } from './quests/QuestEditor';
 import { Sprite } from './ui/Sprite';
 import { Loading } from './ui/Loading';
 
@@ -124,7 +129,7 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
         if (st.picked) st.pick(null);
         return;
       }
-      if (st.modal) return;
+      if (st.modal || st.command.open) return;
       const tabsNow = Object.values(useBoard.getState().tabs).sort((a, b) => a.position - b.position);
       if (/^[1-9]$/.test(e.key)) {
         const t = tabsNow[Number(e.key) - 1];
@@ -133,6 +138,9 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
       else if (e.key === 'a') st.show({ kind: 'agent-new' });
       else if (e.key === 'h') st.open(st.panel?.kind === 'history' ? null : { kind: 'history' });
       else if (e.key === 'k') st.open(st.panel?.kind === 'skills' ? null : { kind: 'skills' });
+      else if (e.key === 'q') st.setView(st.view === 'quests' ? 'board' : 'quests');
+      else if (e.key === 'i') st.setView(st.view === 'integrations' ? 'board' : 'integrations');
+      else if (e.key === 'p') st.setView(st.view === 'portals' ? 'board' : 'portals');
       else if (e.key === 'm') {
         const p = usePrefs.getState();
         const ws = useBoard.getState().settings?.music_enabled_by_default ?? false;
@@ -273,7 +281,13 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
         <Header activeTab={activeTab} onLoggedOut={onLoggedOut} />
         <div className={`game-main ${prefs.tavernCollapsed ? 'tavern-collapsed' : ''}`}>
           <Tavern />
-          {activeTab ? (
+          {ui.view === 'quests' ? (
+            <QuestBoard />
+          ) : ui.view === 'integrations' ? (
+            <Integrations />
+          ) : ui.view === 'portals' ? (
+            <Portals />
+          ) : activeTab ? (
             <Board tabId={activeTab} dragCols={dragCols} draggingTicket={drag?.type === 'ticket' ? drag.id : null} canEdit={canEdit} />
           ) : (
             <div className="board-wrap wood">
@@ -295,6 +309,7 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
         {ui.panel?.kind === 'agent' && <AgentPanel key={`a-${ui.panel.id}`} agentId={ui.panel.id} />}
         {ui.panel?.kind === 'history' && <HistoryDrawer key="history" />}
         {ui.panel?.kind === 'skills' && <SkillsDrawer key="skills" initialId={ui.panel.id} />}
+        {ui.panel?.kind === 'quest' && <QuestPanel key={`q-${ui.panel.id}`} jobId={ui.panel.id} />}
       </AnimatePresence>
 
       {modal?.kind === 'ticket-new' && <TicketModal tabId={modal.tabId} columnId={modal.columnId} />}
@@ -304,6 +319,11 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
       {modal?.kind === 'tab-edit' && <TabEditor tabId={modal.id} />}
       {modal?.kind === 'settings' && <SettingsModal section={modal.section} onLoggedOut={onLoggedOut} />}
       {modal?.kind === 'shortcuts' && <ShortcutsModal />}
+      {modal?.kind === 'quest-new' && <QuestEditor />}
+      {modal?.kind === 'quest-edit' && <QuestEditor jobId={modal.id} />}
+      {modal?.kind === 'portal-new' && <PortalEditor presetKind={modal.preset} />}
+      {modal?.kind === 'portal-edit' && <PortalEditor connectorId={modal.id} />}
+      <CommandBar />
 
       <FxLayer />
       <MusicController />

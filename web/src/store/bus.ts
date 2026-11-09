@@ -1,4 +1,4 @@
-import type { Fx } from '../api/types';
+import type { CommandPlan, Fx } from '../api/types';
 
 type Listener<T> = (v: T) => void;
 
@@ -28,10 +28,13 @@ export type LocalFx =
   | Fx
   | { fx: 'assigned'; agent_id: string; ticket_id: string; via: 'drag' | 'tap' }
   | { fx: 'recruited'; agent_id: string }
-  | { fx: 'blocked'; agent_id: string };
+  | { fx: 'blocked'; agent_id: string }
+  | { fx: 'quest_started'; job_id: string }
+  | { fx: 'quest_done'; job_id: string };
 
 export const fxBus = channel<LocalFx>();
 export const toastBus = channel<ToastMsg>();
+export const planBus = channel<CommandPlan>();
 
 let toastSeq = 0;
 export function toast(text: string, tone: ToastTone = 'info', sprite?: string) {

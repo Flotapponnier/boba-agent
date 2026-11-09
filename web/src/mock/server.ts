@@ -36,8 +36,13 @@ import { ApiFailure, type SocketHandlers, type SocketHandle, type Transport } fr
 import { grants, xpForNextLevel } from '../lib/game';
 import { defaultSync, mkId, seed, type MockState, type MockUser } from './seed';
 import { reviewScript, workScript, type Step } from './scripts';
+import { TOOLS, jobScript, plan } from './automation';
+import { describe as describeSchedule, nextRuns, validateCron } from '../lib/schedule';
+import type { CommandAction, CommandPlan, Connector, CreateConnector, CreateJob, Job, PlannedAction, Schedule, SyncReport, UpdateConnector, UpdateJob, UpdateRepo } from '../api/types';
 
-const STORE_KEY = 'boba-mock-v4';
+const NOPE = Symbol('nope');
+
+const STORE_KEY = 'boba-mock-v5';
 const now = () => new Date().toISOString();
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
@@ -71,6 +76,8 @@ class MockServer implements Transport {
     { user_id: 'u_sam', name: 'Sam', avatar: 'golden_boba', tab_id: 'tab_seo' },
   ];
   speed = 1;
+  private plans = new Map<string, PlannedAction[]>();
+  private pendingCommands = new Map<string, { text: string; tab_id: string | null; ticket_id: string | null; agent_id: string | null }>();
 
   constructor() {
     this.s = this.load();
@@ -80,6 +87,7 @@ class MockServer implements Transport {
     setInterval(() => this.botTick(), 9000);
     setTimeout(() => this.botAssign(true), 4500);
     setTimeout(() => this.autoReview(), 6000);
+    setInterval(() => this.schedulerTick(), 5000);
   }
 
   // ---------------------------------------------------------------- persistence
@@ -336,6 +344,10 @@ class MockServer implements Transport {
     const url = new URL(path, 'http://mock');
     const res = this.route(method, url.pathname, url.searchParams, (body ?? {}) as Record<string, unknown>);
     return structuredClone(res) as T;
+  }
+
+  async upload<T>(path: string, _body: Blob): Promise<T> {
+    return this.request<T>('POST', path, {});
   }
 
   private need(p: Parameters<typeof grants>[1]) {
@@ -707,6 +719,8 @@ class MockServer implements Transport {
       return undefined;
     }
 
+    const auto = this.routeAutomation(method, path, b);
+    if (auto !== NOPE) return auto;
     throw new ApiFailure(404, `No mock route for ${method} ${path}`, 'not_found');
   }
 
@@ -854,7 +868,13 @@ class MockServer implements Transport {
   private resume(r: Run) {
     const t = this.ticket(r.ticket_id);
     const a = this.agent(r.agent_id);
-    if (!t || !a) return;
+    if (!t || !a) {
+      // Job / command runs are not resumable in the mock: close them.
+      r.status = 'cancelled';
+      r.ended_at = now();
+      this.release(a);
+      return;
+    }
     const ctx = { ticket: t, agent: a, repo: 'repo', skills: [], instructions: null, resume: true, prNumber: t.pr_number ?? this.s.prSeq + 1 };
     const steps = r.kind === 'review' ? reviewScript(ctx) : workScript(ctx);
     const idx = Math.floor(steps.length * r.progress);
@@ -965,6 +985,8 @@ class MockServer implements Transport {
     if (status === 'failed') {
       if (r.ticket_id) this.fx({ fx: 'run_failed', agent_id: r.agent_id, ticket_id: r.ticket_id });
       this.hist('run_failed', `${a?.name} failed on T-${t?.number}: ${error}`, { actor_kind: 'agent', actor_id: r.agent_id, agent_id: r.agent_id, ticket_id: r.ticket_id, run_id: r.id });
+    } else if (r.kind === 'job') {
+      this.hist('run_cancelled', `${this.me()?.name ?? 'Someone'} stopped the quest run of ${a?.name}`, { agent_id: r.agent_id, run_id: r.id });
     } else {
       this.hist('run_cancelled', `${this.me()?.name ?? 'Someone'} called ${a?.name} back from T-${t?.number}`, { agent_id: r.agent_id, ticket_id: r.ticket_id, run_id: r.id });
     }
@@ -972,6 +994,8 @@ class MockServer implements Transport {
   }
 
   private complete(r: Run) {
+    if (r.kind === 'job') return this.completeJob(r);
+    if (r.kind === 'command') return this.completeCommand(r);
     const t = this.ticket(r.ticket_id);
     const a = this.agent(r.agent_id);
     r.status = 'succeeded';
@@ -1083,6 +1107,366 @@ class MockServer implements Transport {
       const rev = this.agent(c?.auto_reviewer_agent_id);
       if (rev && rev.status === 'idle') this.startRun(t, rev, 'review', null, null);
     }
+  }
+
+  // ---------------------------------------------------------------- automation (jobs, portals, sync, concierge)
+  private nextAt(s: Schedule): string | null {
+    return nextRuns(s, new Date(), 1)[0]?.toISOString() ?? null;
+  }
+
+  private routeAutomation(method: string, path: string, b: Record<string, unknown>): unknown {
+    const m = (re: RegExp) => path.match(re);
+    let x: RegExpMatchArray | null;
+    const key = `${method} ${path}`;
+    const me = () => this.me()?.name ?? 'Someone';
+
+    // repos
+    if ((x = m(/^\/api\/repos\/([^/]+)$/)) && method === 'PATCH') {
+      this.need('manage_automations');
+      const r = this.s.repos.find((y) => y.id === x![1]);
+      if (!r) throw new ApiFailure(404, 'Repo not found.', 'not_found');
+      const u = b as Partial<UpdateRepo>;
+      if (u.name != null) r.name = u.name;
+      if (u.path != null) r.path = u.path;
+      if (u.remote_url !== undefined) r.remote_url = u.remote_url;
+      if (u.default_branch != null) r.default_branch = u.default_branch;
+      if (u.sync) r.sync = { ...u.sync, last_synced_at: r.sync.last_synced_at, last_error: r.sync.last_error };
+      this.upsert({ entity: 'repo', data: r });
+      return r;
+    }
+    if ((x = m(/^\/api\/repos\/([^/]+)\/sync$/)) && method === 'POST') {
+      this.need('run_agents');
+      const r = this.s.repos.find((y) => y.id === x![1]);
+      if (!r) throw new ApiFailure(404, 'Repo not found.', 'not_found');
+      return this.syncRepo(r.id);
+    }
+
+    // connectors
+    if (key === 'POST /api/connectors') {
+      this.need('manage_automations');
+      const c = b as unknown as CreateConnector;
+      if (!c.name?.trim()) throw new ApiFailure(400, 'A portal needs a name.', 'bad_request');
+      const cn: Connector = { id: mkId('cn'), name: c.name.trim(), kind: c.kind, transport: c.transport, secret_keys: Object.entries(c.secrets ?? {}).filter(([, v]) => !!v).map(([k]) => k), allowed_tools: c.allowed_tools ?? [], created_by: this.me()?.id ?? null, created_at: now() };
+      this.s.connectors.push(cn);
+      this.upsert({ entity: 'connector', data: cn });
+      this.hist('connector_created', `${me()} opened the portal ${cn.name}`);
+      return cn;
+    }
+    if ((x = m(/^\/api\/connectors\/([^/]+)(?:\/(test))?$/))) {
+      this.need('manage_automations');
+      const cn = this.s.connectors.find((y) => y.id === x![1]);
+      if (!cn) throw new ApiFailure(404, 'Portal not found.', 'not_found');
+      if (x[2] === 'test') {
+        const broken = (cn.transport.type === 'stdio' && !cn.transport.command.trim()) || (cn.transport.type === 'http' && !/^https?:\/\//.test(cn.transport.url));
+        return broken ? { ok: false, tools: [], error: 'Could not start the MCP server: the command / URL is empty or invalid.' } : { ok: true, tools: (cn.allowed_tools.length ? cn.allowed_tools : TOOLS[cn.kind]), error: null };
+      }
+      if (method === 'PATCH') {
+        const u = b as Partial<UpdateConnector>;
+        if (u.name != null) cn.name = u.name;
+        if (u.transport) cn.transport = u.transport;
+        if (u.allowed_tools) cn.allowed_tools = u.allowed_tools;
+        if (u.secrets) {
+          const keys = new Set(cn.secret_keys);
+          for (const [k, v] of Object.entries(u.secrets)) {
+            if (v) keys.add(k);
+            else keys.delete(k);
+          }
+          cn.secret_keys = [...keys];
+        }
+        this.upsert({ entity: 'connector', data: cn });
+        this.hist('connector_updated', `${me()} tuned the portal ${cn.name}`);
+        return cn;
+      }
+      if (method === 'DELETE') {
+        this.s.connectors = this.s.connectors.filter((y) => y !== cn);
+        for (const a of this.s.agents)
+          if (a.connector_ids.includes(cn.id)) {
+            a.connector_ids = a.connector_ids.filter((i) => i !== cn.id);
+            this.upsert({ entity: 'agent', data: a });
+          }
+        this.del('connector', cn.id);
+        this.hist('connector_deleted', `${me()} closed the portal ${cn.name}`);
+        return undefined;
+      }
+    }
+
+    // jobs
+    if (key === 'POST /api/jobs/preview-schedule') {
+      this.need('view');
+      const s = b as unknown as Schedule;
+      const err = s.type === 'cron' ? validateCron(s.expr) : s.type === 'interval' && s.minutes < 5 ? 'The shortest interval is 5 minutes.' : null;
+      return { valid: !err, error: err, next: err ? [] : nextRuns(s, new Date(), 5).map((d) => d.toISOString()), description: err ? '' : describeSchedule(s) };
+    }
+    if (key === 'POST /api/jobs') {
+      this.need('manage_automations');
+      const c = b as unknown as CreateJob;
+      if (!c.name?.trim()) throw new ApiFailure(400, 'A quest needs a name.', 'bad_request');
+      if (!this.agent(c.agent_id)) throw new ApiFailure(400, 'Pick an agent for this quest.', 'bad_request');
+      if (c.output === 'pull_request' && !c.repo_id) throw new ApiFailure(400, 'A pull request quest needs a repository.', 'bad_request');
+      const j: Job = { id: mkId('job'), name: c.name.trim(), description: c.description ?? '', icon: c.icon || '📜', agent_id: c.agent_id, prompt: c.prompt, schedule: c.schedule, output: c.output, enabled: c.enabled ?? true, repo_id: c.repo_id, tab_id: c.tab_id, skip_if_running: c.skip_if_running ?? true, last_run_id: null, last_run_at: null, next_run_at: null, last_result: null, runs_count: 0, created_by: this.me()?.id ?? null, created_at: now() };
+      j.next_run_at = j.enabled ? this.nextAt(j.schedule) : null;
+      this.s.jobs.push(j);
+      this.upsert({ entity: 'job', data: j });
+      this.hist('job_created', `${me()} pinned the quest "${j.name}" for ${this.agent(j.agent_id)?.name}`, { agent_id: j.agent_id });
+      return j;
+    }
+    if ((x = m(/^\/api\/jobs\/([^/]+)(?:\/(run|runs))?$/))) {
+      const j = this.s.jobs.find((y) => y.id === x![1]);
+      if (!j) throw new ApiFailure(404, 'Quest not found.', 'not_found');
+      if (x[2] === 'runs') {
+        this.need('view');
+        return this.s.runs.filter((r) => r.job_id === j.id).sort((a, b2) => (a.created_at < b2.created_at ? 1 : -1));
+      }
+      if (x[2] === 'run') {
+        this.need('run_agents');
+        return this.startJobRun(j, this.me()?.id ?? null);
+      }
+      this.need('manage_automations');
+      if (method === 'PATCH') {
+        for (const [k, v] of Object.entries(b as Partial<UpdateJob>)) if (v !== undefined) (j as Record<string, unknown>)[k] = v;
+        j.next_run_at = j.enabled ? this.nextAt(j.schedule) : null;
+        this.upsert({ entity: 'job', data: j });
+        this.hist('job_updated', `${me()} updated the quest "${j.name}"`, { agent_id: j.agent_id });
+        return j;
+      }
+      if (method === 'DELETE') {
+        this.s.jobs = this.s.jobs.filter((y) => y !== j);
+        this.del('job', j.id);
+        this.hist('job_deleted', `${me()} tore down the quest "${j.name}"`);
+        return undefined;
+      }
+    }
+
+    // concierge
+    if (key === 'POST /api/command') {
+      this.need('view');
+      const text = String(b.text ?? '').trim();
+      if (!text) throw new ApiFailure(400, 'Say something first.', 'bad_request');
+      const r: Run = {
+        id: mkId('run'), ticket_id: null, job_id: null, agent_id: 'concierge', kind: 'command', status: 'running', runner_id: 'local', branch: null, worktree_path: null,
+        session_id: mkId('sess'), progress: 0, activity: 'Listening', summary: null, verdict: null, cost_usd: 0, input_tokens: 0, output_tokens: 0,
+        started_by: this.me()?.id ?? null, created_at: now(), started_at: now(), ended_at: null, error: null,
+      };
+      this.s.runs.push(r);
+      this.pendingCommands.set(r.id, { text, tab_id: (b.tab_id as string) ?? null, ticket_id: (b.ticket_id as string) ?? null, agent_id: (b.agent_id as string) ?? null });
+      this.upsert({ entity: 'run', data: r });
+      this.hist('command_issued', `${me()} asked the Concierge${b.voice ? ' (voice)' : ''}: "${text}"`, { run_id: r.id });
+      const steps: Step[] = [
+        { kind: 'system', text: 'Concierge · read-only · board digest loaded', activity: 'Reading the board', wait: 500 },
+        { kind: 'thinking', text: `Resolving names and ids for: ${text}`, activity: 'Thinking', wait: 900 },
+      ];
+      this.sims.set(r.id, { runId: r.id, steps, idx: 0, nextIn: 200, waiting: null, speed: 1 });
+      return r;
+    }
+    if (key === 'POST /api/command/execute') {
+      const runId = String(b.run_id);
+      const actions = (b.actions ?? []) as CommandAction[];
+      const results = actions.map((a) => {
+        try {
+          return { ok: true, error: null, entity: this.executeAction(a) };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e), entity: null };
+        }
+      });
+      const ok = results.filter((r) => r.ok).length;
+      this.hist('command_executed', `${me()} confirmed ${ok}/${actions.length} Concierge action${actions.length > 1 ? 's' : ''}`, { run_id: runId });
+      this.plans.delete(runId);
+      return results;
+    }
+    if (key === 'POST /api/speech/transcribe') throw new ApiFailure(400, 'The demo uses your browser for speech.', 'bad_request');
+    return NOPE;
+  }
+
+  private executeAction(a: CommandAction): Entity | null {
+    const call = <T>(method: string, path: string, body?: unknown) => this.route(method, path, new URLSearchParams(), (body ?? {}) as Record<string, unknown>) as T;
+    switch (a.action) {
+      case 'create_ticket':
+        return { entity: 'ticket', data: call<Ticket>('POST', '/api/tickets', a.ticket) };
+      case 'update_ticket':
+        return { entity: 'ticket', data: call<Ticket>('PATCH', `/api/tickets/${a.ticket_id}`, a.patch) };
+      case 'move_ticket': {
+        const pos = this.endPos(a.column_id);
+        return { entity: 'ticket', data: call<Ticket>('POST', `/api/tickets/${a.ticket_id}/move`, { column_id: a.column_id, position: pos }) };
+      }
+      case 'assign_agent':
+        return { entity: 'run', data: call<Run>('POST', `/api/tickets/${a.ticket_id}/assign`, a.assign) };
+      case 'create_agent':
+        return { entity: 'agent', data: call<Agent>('POST', '/api/agents', a.agent) };
+      case 'update_agent':
+        return { entity: 'agent', data: call<Agent>('PATCH', `/api/agents/${a.agent_id}`, a.patch) };
+      case 'create_job':
+        return { entity: 'job', data: call<Job>('POST', '/api/jobs', a.job) };
+      case 'update_job':
+        return { entity: 'job', data: call<Job>('PATCH', `/api/jobs/${a.job_id}`, a.patch) };
+      case 'run_job':
+        return { entity: 'run', data: call<Run>('POST', `/api/jobs/${a.job_id}/run`) };
+      case 'create_tab':
+        return { entity: 'tab', data: call<Tab>('POST', '/api/tabs', a.tab) };
+      case 'sync_repo':
+        call('POST', `/api/repos/${a.repo_id}/sync`);
+        return null;
+      case 'cancel_run':
+        return { entity: 'run', data: call<Run>('POST', `/api/runs/${a.run_id}/cancel`) };
+    }
+  }
+
+  private completeCommand(r: Run) {
+    r.status = 'succeeded';
+    r.progress = 1;
+    r.ended_at = now();
+    const req = this.pendingCommands.get(r.id);
+    this.pendingCommands.delete(r.id);
+    const me = this.me();
+    const p = plan({
+      text: req?.text ?? '',
+      tab_id: req?.tab_id ?? null,
+      ticket_id: req?.ticket_id ?? null,
+      agent_id: req?.agent_id ?? null,
+      tabs: this.s.tabs,
+      agents: this.s.agents,
+      tickets: this.s.tickets,
+      jobs: this.s.jobs,
+      repos: this.s.repos,
+      grants: (perm) => grants(me?.role, perm),
+    });
+    r.summary = p.question ?? p.reply;
+    r.activity = 'Plan ready';
+    this.plans.set(r.id, p.actions);
+    this.upsert({ entity: 'run', data: r });
+    const cp: CommandPlan = { run_id: r.id, reply: p.reply, actions: p.actions, question: p.question };
+    this.broadcast({ type: 'command_plan', plan: cp });
+  }
+
+  private startJobRun(j: Job, by: string | null): Run {
+    const a = this.agent(j.agent_id);
+    if (!a) throw new ApiFailure(400, 'This quest has no agent.', 'bad_request');
+    if (a.status !== 'idle') throw new ApiFailure(409, `${a.name} is busy. Try again when it is back in the tavern.`, 'conflict');
+    if (j.skip_if_running && this.s.runs.some((r) => r.job_id === j.id && (r.status === 'running' || r.status === 'waiting'))) throw new ApiFailure(409, 'This quest is already running.', 'conflict');
+    const r: Run = {
+      id: mkId('run'), ticket_id: null, job_id: j.id, agent_id: a.id, kind: 'job', status: 'running', runner_id: 'local', branch: j.output === 'pull_request' ? `boba/job-${j.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : null,
+      worktree_path: null, session_id: mkId('sess'), progress: 0, activity: 'Reading the quest', summary: null, verdict: null, cost_usd: 0, input_tokens: 0, output_tokens: 0,
+      started_by: by, created_at: now(), started_at: now(), ended_at: null, error: null,
+    };
+    this.s.runs.push(r);
+    a.status = 'working';
+    a.current_run_id = r.id;
+    j.last_run_id = r.id;
+    this.upsert({ entity: 'agent', data: a });
+    this.upsert({ entity: 'run', data: r });
+    this.upsert({ entity: 'job', data: j });
+    const who = by ? this.s.users.find((u) => u.id === by)?.name ?? 'Someone' : 'The scheduler';
+    this.hist('job_run_started', `${who} sent ${a.name} on the quest "${j.name}"`, { actor_kind: by ? 'user' : 'system', actor_id: by, agent_id: a.id, run_id: r.id });
+    const cns = a.connector_ids.map((id) => this.s.connectors.find((c) => c.id === id)).filter((c): c is Connector => !!c);
+    const { steps } = jobScript(j, a, cns);
+    this.sims.set(r.id, { runId: r.id, steps, idx: 0, nextIn: 300, waiting: null, speed: 1 });
+    return r;
+  }
+
+  private completeJob(r: Run) {
+    const j = this.s.jobs.find((y) => y.id === r.job_id);
+    const a = this.agent(r.agent_id);
+    r.status = 'succeeded';
+    r.progress = 1;
+    r.ended_at = now();
+    this.s.stats.runs_completed++;
+    this.s.stats.total_cost_usd = +(this.s.stats.total_cost_usd + r.cost_usd).toFixed(4);
+    if (j && a) {
+      const cns = a.connector_ids.map((id) => this.s.connectors.find((c) => c.id === id)).filter((c): c is Connector => !!c);
+      const out = jobScript(j, a, cns);
+      for (const tk of out.tickets) {
+        const tab = this.tab(j.tab_id ?? '') ?? this.s.tabs[0];
+        const col = tab && (this.firstCol(tab.id, 'todo') ?? tab.columns[0]);
+        if (!tab || !col) continue;
+        const t: Ticket = {
+          id: mkId('tk'), number: ++this.s.seq, tab_id: tab.id, column_id: col.id, position: this.endPos(col.id), title: tk.title, body: tk.body, tags: tk.tags, priority: 'normal', color: null, repo_id: null,
+          agent_id: null, branch: null, pr_url: null, pr_number: null, review_feedback: null, review_rounds: 0, source: { kind: 'job', job_id: j.id, run_id: r.id }, created_by: null, created_at: now(), updated_at: now(),
+        };
+        this.s.tickets.push(t);
+        this.upsert({ entity: 'ticket', data: t });
+        this.hist('ticket_created', `${a.name} filed T-${t.number} ${t.title} (quest "${j.name}")`, { actor_kind: 'agent', actor_id: a.id, agent_id: a.id, ticket_id: t.id, run_id: r.id });
+      }
+      j.last_result = out.report;
+      j.last_run_at = now();
+      j.runs_count++;
+      j.next_run_at = j.enabled ? this.nextAt(j.schedule) : null;
+      r.summary = out.report.split('\n').find((l) => l.trim() && !l.startsWith('#')) ?? out.report;
+      r.activity = 'Quest complete';
+      a.runs_completed++;
+      this.release(a);
+      this.addXp(a, 25);
+      this.upsert({ entity: 'agent', data: a });
+      this.upsert({ entity: 'job', data: j });
+      this.hist('job_run_finished', `${a.name} completed the quest "${j.name}": ${r.summary}`, { actor_kind: 'agent', actor_id: a.id, agent_id: a.id, run_id: r.id });
+    }
+    this.upsert({ entity: 'run', data: r });
+  }
+
+  private schedulerTick() {
+    if (!this.me()) return;
+    const t = new Date().toISOString();
+    for (const j of this.s.jobs) {
+      if (!j.enabled || !j.next_run_at || j.next_run_at > t) continue;
+      try {
+        this.startJobRun(j, null);
+      } catch {
+        // busy agent / already running: skip this tick
+        j.next_run_at = this.nextAt(j.schedule);
+        this.upsert({ entity: 'job', data: j });
+      }
+    }
+  }
+
+  private ghSeq = 1300;
+  private syncRepo(repoId: string): SyncReport {
+    const r = this.s.repos.find((y) => y.id === repoId);
+    if (!r) throw new ApiFailure(404, 'Repo not found.', 'not_found');
+    const report: SyncReport = { imported_issues: 0, imported_prs: 0, updated: 0, closed: 0, errors: [] };
+    const tab = this.tab(r.sync.target_tab_id ?? '') ?? this.s.tabs.find((t) => t.repo_id === r.id);
+    if (!tab) {
+      report.errors.push('No target tab: choose where imported tickets go.');
+    } else {
+      const issues = [
+        ['Dark mode flickers on first load', 'octo-lea', ['bug', 'ui']],
+        ['Export trades as CSV', 'marta-dev', ['feature']],
+        ['Docs: explain the fee tiers', 'nico42', ['docs']],
+      ] as const;
+      const pick = issues[Math.floor(Math.random() * issues.length)] as (typeof issues)[number];
+      if (r.sync.import_issues && (!r.sync.issue_labels.length || r.sync.issue_labels.some((l) => (pick[2] as readonly string[]).includes(l)))) {
+        const col = this.firstCol(tab.id, 'todo') ?? tab.columns[0];
+        if (col) {
+          const n = ++this.ghSeq;
+          const t: Ticket = {
+            id: mkId('tk'), number: ++this.s.seq, tab_id: tab.id, column_id: col.id, position: this.endPos(col.id), title: pick[0], body: `Imported from GitHub issue #${n} by @${pick[1]}.`, tags: [...pick[2]], priority: 'normal', color: null, repo_id: r.id,
+            agent_id: null, branch: null, pr_url: null, pr_number: null, review_feedback: null, review_rounds: 0, source: { kind: 'github_issue', repo_id: r.id, number: n, url: `https://github.com/${r.name}/issues/${n}`, author: pick[1] }, created_by: null, created_at: now(), updated_at: now(),
+          };
+          this.s.tickets.push(t);
+          this.upsert({ entity: 'ticket', data: t });
+          this.hist('ticket_imported', `Imported issue #${n} "${t.title}" from ${r.name} as T-${t.number}`, { actor_kind: 'system', ticket_id: t.id });
+          report.imported_issues++;
+        }
+      }
+      if (r.sync.import_prs && Math.random() < 0.6) {
+        const col = this.firstCol(tab.id, 'review');
+        if (col) {
+          const n = ++this.ghSeq;
+          const t: Ticket = {
+            id: mkId('tk'), number: ++this.s.seq, tab_id: tab.id, column_id: col.id, position: this.endPos(col.id), title: 'Add Turkish translation', body: `External PR #${n} by @ext-contrib.`, tags: ['i18n'], priority: 'normal', color: null, repo_id: r.id,
+            agent_id: null, branch: 'i18n-tr', pr_url: `https://github.com/${r.name}/pull/${n}`, pr_number: n, review_feedback: null, review_rounds: 0, source: { kind: 'github_pr', repo_id: r.id, number: n, url: `https://github.com/${r.name}/pull/${n}`, author: 'ext-contrib', head_branch: 'i18n-tr' }, created_by: null, created_at: now(), updated_at: now(),
+          };
+          this.s.tickets.push(t);
+          this.upsert({ entity: 'ticket', data: t });
+          this.hist('ticket_imported', `Imported PR #${n} "${t.title}" from ${r.name} into ${col.name}`, { actor_kind: 'system', ticket_id: t.id });
+          report.imported_prs++;
+          setTimeout(() => this.autoReview(), 800);
+        }
+      }
+      report.updated = Math.floor(Math.random() * 3);
+    }
+    r.sync.last_synced_at = now();
+    r.sync.last_error = report.errors[0] ?? null;
+    this.upsert({ entity: 'repo', data: r });
+    this.hist('repo_synced', `Synced ${r.name}: ${report.imported_issues} issue(s), ${report.imported_prs} PR(s) imported`, { actor_kind: 'system' });
+    return report;
   }
 
   // ---------------------------------------------------------------- demo teammates
