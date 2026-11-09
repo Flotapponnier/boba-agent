@@ -71,3 +71,21 @@ Server → client `ServerMessage`, client → server `ClientMessage` (see `event
 ## Dev mode
 `BOBA_DEV_CORS=http://localhost:5173` lets the Vite dev server call the API; Vite proxies
 `/api` (incl. WS) to `http://localhost:7777`.
+
+## Integrations & automation [ManageAutomations unless stated]
+| Method | Path | Body → Response |
+|---|---|---|
+| PATCH | `/api/repos/:id` | `UpdateRepo` → `Repo` (incl. `sync`) |
+| POST | `/api/repos/:id/sync` [RunAgents] | → `SyncReport` |
+| POST | `/api/github/webhook` | GitHub webhook (HMAC `BOBA_GITHUB_WEBHOOK_SECRET`), public |
+| POST | `/api/connectors` | `CreateConnector` → `Connector` |
+| PATCH | `/api/connectors/:id` | `UpdateConnector` → `Connector` |
+| DELETE | `/api/connectors/:id` | → 204 |
+| POST | `/api/connectors/:id/test` | → `ConnectorTestResult` |
+| POST | `/api/jobs` | `CreateJob` → `Job` |
+| PATCH | `/api/jobs/:id` | `UpdateJob` → `Job` |
+| DELETE | `/api/jobs/:id` | → 204 |
+| POST | `/api/jobs/:id/run` [RunAgents] | → `Run` |
+| GET | `/api/jobs/:id/runs` [View] | → `Run[]` |
+| POST | `/api/jobs/preview-schedule` [View] | `Schedule` → `SchedulePreview` |
+| POST | `/api/mcp` | MCP streamable HTTP for agents, bearer = per-run token (not a user session) |

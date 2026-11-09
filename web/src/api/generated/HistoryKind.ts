@@ -3,4 +3,4 @@
 /**
  * What happened, for the history timeline ("everything is visible").
  */
-export type HistoryKind = "ticket_created" | "ticket_updated" | "ticket_moved" | "ticket_deleted" | "agent_created" | "agent_updated" | "agent_deleted" | "agent_level_up" | "run_started" | "run_waiting" | "run_succeeded" | "run_failed" | "run_cancelled" | "pr_opened" | "review_approved" | "review_changes_requested" | "skill_created" | "skill_updated" | "tab_created" | "tab_updated" | "tab_deleted" | "user_joined" | "comment";
+export type HistoryKind = "ticket_created" | "ticket_updated" | "ticket_moved" | "ticket_deleted" | "agent_created" | "agent_updated" | "agent_deleted" | "agent_level_up" | "run_started" | "run_waiting" | "run_succeeded" | "run_failed" | "run_cancelled" | "pr_opened" | "review_approved" | "review_changes_requested" | "skill_created" | "skill_updated" | "tab_created" | "tab_updated" | "tab_deleted" | "user_joined" | "job_created" | "job_updated" | "job_deleted" | "job_run_started" | "job_run_finished" | "ticket_imported" | "repo_synced" | "connector_created" | "connector_updated" | "connector_deleted" | "comment";

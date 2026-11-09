@@ -4,4 +4,4 @@ import type { PermissionMode } from "./PermissionMode";
 /**
  * PATCH semantics: absent field = unchanged.
  */
-export type UpdateAgent = { name: string | null, role: string | null, sprite: string | null, color: string | null, tagline: string | null, system_prompt: string | null, skill_ids: Array<string> | null, model: string | null | null, permission_mode: PermissionMode | null, allowed_tools: Array<string> | null, max_turns: number | null | null, };
+export type UpdateAgent = { connector_ids: Array<string> | null, board_tools: boolean | null, name: string | null, role: string | null, sprite: string | null, color: string | null, tagline: string | null, system_prompt: string | null, skill_ids: Array<string> | null, model: string | null | null, permission_mode: PermissionMode | null, allowed_tools: Array<string> | null, max_turns: number | null | null, };

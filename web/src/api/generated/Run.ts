@@ -6,7 +6,15 @@ import type { RunStatus } from "./RunStatus";
 /**
  * One execution of an agent on a ticket.
  */
-export type Run = { id: string, ticket_id: string, agent_id: string, kind: RunKind, status: RunStatus, runner_id: string | null, branch: string | null, worktree_path: string | null, 
+export type Run = { id: string, 
+/**
+ * None for job runs.
+ */
+ticket_id: string | null, 
+/**
+ * Set for job runs.
+ */
+job_id: string | null, agent_id: string, kind: RunKind, status: RunStatus, runner_id: string | null, branch: string | null, worktree_path: string | null, 
 /**
  * Claude Code session id, for resume / follow-up messages.
  */

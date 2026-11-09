@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::automation::*;
 use crate::model::*;
 
 /// What happened, for the history timeline ("everything is visible").
@@ -40,6 +41,16 @@ pub enum HistoryKind {
     TabUpdated,
     TabDeleted,
     UserJoined,
+    JobCreated,
+    JobUpdated,
+    JobDeleted,
+    JobRunStarted,
+    JobRunFinished,
+    TicketImported,
+    RepoSynced,
+    ConnectorCreated,
+    ConnectorUpdated,
+    ConnectorDeleted,
     Comment,
 }
 
@@ -86,6 +97,8 @@ pub enum Entity {
     Repo(Repo),
     User(User),
     Runner(RunnerInfo),
+    Job(Job),
+    Connector(Connector),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -100,6 +113,8 @@ pub enum EntityKind {
     Repo,
     User,
     Runner,
+    Job,
+    Connector,
 }
 
 /// Purely cosmetic one-shot effects so every connected screen celebrates together.

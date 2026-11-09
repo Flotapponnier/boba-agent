@@ -84,3 +84,45 @@ terms reserve subscriptions for individual use. Without a key Boba Agent starts 
 ## Data
 SQLite in `BOBA_DATA_DIR` (default `./data`): users, sessions, tabs, columns, agents, skills, repos,
 tickets, runs, run_logs, history. Run logs are append-only; history is append-only.
+
+## Integrations, connectors and jobs
+
+Types live in `crates/boba-core/src/automation.rs`.
+
+### Repo sync (GitHub)
+Each `Repo` has a `RepoSync`. When enabled, the server syncs every `poll_minutes` (and on
+`POST /api/repos/:id/sync`, and on GitHub webhooks if `BOBA_GITHUB_WEBHOOK_SECRET` is set):
+- open issues (optionally filtered by label) → tickets in the target tab's first Todo column,
+  `source = GithubIssue`; title/body kept in sync while the ticket is not running;
+- open PRs (incl. external contributors, drafts skipped by default) → tickets in the target tab's
+  Review column, `source = GithubPr`, so the column's auto reviewer reviews them. Review runs on an
+  imported PR check out `head_branch`;
+- back to GitHub: run summaries and verdicts as comments (`comment_back`), real PR reviews
+  (`post_reviews`), issue closed when the ticket reaches Done (`close_issues_on_done`).
+Imports are idempotent: (repo_id, kind, number) is unique. GitHub access uses `GH_TOKEN` /
+`gh auth` on the server (a GitHub App is a later option).
+
+### Connectors (MCP)
+A `Connector` is an MCP server (stdio command or remote HTTP) with write-only secrets stored
+encrypted (`BOBA_SECRET_KEY`, AES-GCM) in SQLite. Presets in the UI (Google Workspace, Search
+Console, Linear, Slack, Sentry, Notion, web search, Postgres, custom) only pre-fill the transport.
+Agents list the connectors they may use (`Agent.connector_ids`). For each run the server resolves
+secrets into `RunSpec.mcp_servers`; the runner writes a per-run `--mcp-config` file (0600, deleted
+after the run) and adds the allowed tools as `mcp__<name>__<tool>` to `--allowedTools`.
+
+### Board tools (the server's own MCP endpoint)
+`/api/mcp` is a streamable-HTTP MCP server authenticated with a per-run bearer token
+(`RunSpec.board_tools`, revoked when the run ends). Tools: `list_tabs`, `list_tickets`
+(filters: tab, column kind, tag, text), `get_ticket`, `create_ticket` (tab, title, body, tags,
+priority), `update_ticket`, `comment_ticket`, `search_history`. Everything an agent does through
+it is attributed to the agent in the history (`ActorKind::Agent`) and tickets get
+`source = Agent | Job`. Agents with `board_tools = true` get it; this is how a "Triage" agent turns
+Search Console / Sentry / Linear data into tickets.
+
+### Scheduled jobs (Quest Board)
+A `Job` = agent + prompt + `Schedule` (manual, interval ≥ 5 min, or cron + IANA timezone) +
+`JobOutput` (tickets via board tools, a stored report, or a PR in `repo_id`). The server scheduler
+ticks every 15 s, computes `next_run_at`, and starts a `Run{kind: Job, ticket_id: None, job_id}`;
+`skip_if_running` avoids overlaps; missed ticks while the server was down run once at startup.
+"Run now" = `POST /api/jobs/:id/run`. A job run's report is stored in `Job.last_result` and passed to
+the next run as `previous_result` so recurring jobs don't repeat themselves.

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::automation::*;
 use crate::event::HistoryEvent;
 use crate::model::*;
 
@@ -20,6 +21,8 @@ pub struct Snapshot {
     pub repos: Vec<Repo>,
     pub users: Vec<User>,
     pub runners: Vec<RunnerInfo>,
+    pub jobs: Vec<Job>,
+    pub connectors: Vec<Connector>,
     /// Latest 100 history events, newest first.
     pub history: Vec<HistoryEvent>,
     pub settings: WorkspaceSettings,
@@ -126,6 +129,8 @@ pub struct UpdateUser {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CreateAgent {
+    pub connector_ids: Option<Vec<Id>>,
+    pub board_tools: Option<bool>,
     pub name: String,
     pub role: String,
     pub sprite: String,
@@ -143,6 +148,8 @@ pub struct CreateAgent {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct UpdateAgent {
+    pub connector_ids: Option<Vec<Id>>,
+    pub board_tools: Option<bool>,
     pub name: Option<String>,
     pub role: Option<String>,
     pub sprite: Option<String>,
@@ -267,6 +274,7 @@ pub struct UpdateTab {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CreateRepo {
+    pub sync: Option<RepoSync>,
     pub name: String,
     pub path: String,
     pub remote_url: Option<String>,
@@ -310,4 +318,102 @@ pub struct HistoryQuery {
 pub struct ApiError {
     pub error: String,
     pub code: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateRepo {
+    pub name: Option<String>,
+    pub path: Option<String>,
+    pub remote_url: Option<Option<String>>,
+    pub default_branch: Option<String>,
+    pub sync: Option<RepoSync>,
+}
+
+/// `POST /api/repos/:id/sync` result.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SyncReport {
+    pub imported_issues: u32,
+    pub imported_prs: u32,
+    pub updated: u32,
+    pub closed: u32,
+    pub errors: Vec<String>,
+}
+
+// ---------------------------------------------------------------- connectors
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateConnector {
+    pub name: String,
+    pub kind: ConnectorKind,
+    pub transport: McpTransport,
+    /// Write-only secret values by key.
+    pub secrets: std::collections::BTreeMap<String, String>,
+    pub allowed_tools: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateConnector {
+    pub name: Option<String>,
+    pub transport: Option<McpTransport>,
+    /// Keys present are set; a key mapped to "" is deleted; absent keys are kept.
+    pub secrets: Option<std::collections::BTreeMap<String, String>>,
+    pub allowed_tools: Option<Vec<String>>,
+}
+
+/// `POST /api/connectors/:id/test` – starts the MCP server and lists its tools.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConnectorTestResult {
+    pub ok: bool,
+    pub tools: Vec<String>,
+    pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------- jobs
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateJob {
+    pub name: String,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub agent_id: Id,
+    pub prompt: String,
+    pub schedule: Schedule,
+    pub output: JobOutput,
+    pub enabled: Option<bool>,
+    pub repo_id: Option<Id>,
+    pub tab_id: Option<Id>,
+    pub skip_if_running: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateJob {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub agent_id: Option<Id>,
+    pub prompt: Option<String>,
+    pub schedule: Option<Schedule>,
+    pub output: Option<JobOutput>,
+    pub enabled: Option<bool>,
+    pub repo_id: Option<Option<Id>>,
+    pub tab_id: Option<Option<Id>>,
+    pub skip_if_running: Option<bool>,
+}
+
+/// `POST /api/jobs/preview-schedule` – validate a schedule and show the next fire times.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SchedulePreview {
+    pub valid: bool,
+    pub error: Option<String>,
+    pub next: Vec<chrono::DateTime<chrono::Utc>>,
+    /// Human sentence, e.g. "Every Monday at 09:00 (Europe/Paris)".
+    pub description: String,
 }
