@@ -1836,16 +1836,13 @@ impl Db {
         auth: boba_core::team::RunnerAuth,
         host: &str,
         claude_version: Option<&str>,
-        max_concurrent_runs: u32,
     ) -> anyhow::Result<()> {
         sqlx::query(
-            "UPDATE runners SET auth = ?, host = ?, claude_version = ?, max_concurrent_runs = ?,
-               last_seen_at = ? WHERE id = ?",
+            "UPDATE runners SET auth = ?, host = ?, claude_version = ?, last_seen_at = ? WHERE id = ?",
         )
         .bind(enc(&auth))
         .bind(host)
         .bind(claude_version)
-        .bind(max_concurrent_runs as i64)
         .bind(ts(Utc::now()))
         .bind(rid.to_string())
         .execute(&self.pool)
