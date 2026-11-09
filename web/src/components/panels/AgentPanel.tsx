@@ -11,6 +11,7 @@ import { Drawer } from '../ui/Overlay';
 import { Sprite } from '../ui/Sprite';
 import { HistoryList } from './HistoryList';
 import { STATUS_LABEL } from './RunView';
+import { Icon } from '../ui/Icon';
 
 export function AgentPanel({ agentId }: { agentId: string }) {
   const a = useBoard((s) => s.agents[agentId]);
@@ -163,7 +164,9 @@ export function AgentPanel({ agentId }: { agentId: string }) {
           </dd>
           <dt>PORTALS</dt>
           <dd className="chips">
-            {a.connector_ids.length ? a.connector_ids.map((id) => <span key={id} className="chip">🌀 {connectors[id]?.name ?? id}</span>) : '—'}
+            {a.connector_ids.length ? a.connector_ids.map((id) => <span key={id} className="chip">
+                    <Icon name="portal" size={12} /> {connectors[id]?.name ?? id}
+                  </span>) : '—'}
           </dd>
           <dt>BOARD TOOLS</dt>
           <dd>{a.board_tools ? 'On: can file and update tickets' : 'Off'}</dd>
@@ -187,7 +190,7 @@ export function AgentPanel({ agentId }: { agentId: string }) {
         {canManage && !isConcierge(a) && (
           <div className="row" style={{ marginTop: 12 }}>
             <button className="btn gold sm" onClick={() => ui.show({ kind: 'agent-edit', id: a.id })}>
-              ✏ Edit persona
+              <Icon name="edit" size={14} /> Edit persona
             </button>
             <button
               className="btn red sm"
@@ -197,7 +200,7 @@ export function AgentPanel({ agentId }: { agentId: string }) {
                 if (confirm(`Send ${a.name} home? Its history stays.`) && (await deleteAgent(a.id))) ui.open(null);
               }}
             >
-              👋 Dismiss
+              Dismiss
             </button>
           </div>
         )}
@@ -208,7 +211,7 @@ export function AgentPanel({ agentId }: { agentId: string }) {
           const t = r.ticket_id ? tickets[r.ticket_id] : undefined;
           return (
             <button key={r.id} className="run-row" onClick={() => t && ui.open({ kind: 'ticket', id: t.id, view: 'live' })}>
-              <span>{r.kind === 'review' ? '🔍' : r.kind === 'job' ? '📜' : r.kind === 'command' ? '🎙' : '🛠'}</span>
+              <Icon name={r.kind === 'review' ? 'search' : r.kind === 'job' ? 'quest' : r.kind === 'command' ? 'mic' : 'tools'} />
               <span style={{ minWidth: 0 }}>
                 {t ? `T-${t.number} ${t.title}` : r.kind === 'job' ? 'Quest run' : r.kind === 'command' ? 'Concierge command' : 'Deleted ticket'}
                 <br />

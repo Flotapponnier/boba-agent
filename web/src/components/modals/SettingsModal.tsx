@@ -11,6 +11,8 @@ import { useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { Modal } from '../ui/Overlay';
+import { Icon } from '../ui/Icon';
+import type { IconName } from '../../lib/icons';
 
 type Section = 'me' | 'workspace' | 'team' | 'repos';
 
@@ -278,7 +280,9 @@ function Team() {
           </select>
         </div>
         <div className="row end" style={{ marginTop: 8 }}>
-          <button className="btn gold sm">✉ Create invite link</button>
+          <button className="btn gold sm">
+            <Icon name="mail" size={14} /> Create invite link
+          </button>
         </div>
       </form>
       {link && (
@@ -309,7 +313,9 @@ function Repos() {
       {Object.values(repos).map((r) => (
         <div key={r.id} className="user-row" style={{ gridTemplateColumns: '1fr auto' }}>
           <span>
-            <b>⎇ {r.name}</b>
+            <b>
+                <Icon name="repo" size={12} /> {r.name}
+              </b>
             <br />
             <span className="hint-text">
               {r.path} · {r.default_branch}
@@ -391,11 +397,11 @@ export function SettingsModal({ section }: { section?: Section; onLoggedOut: () 
   const canWs = useCan('manage_workspace');
   const canUsers = useCan('manage_users');
   const [sec, setSec] = useState<Section>(section ?? 'me');
-  const nav: { id: Section; label: string; show: boolean }[] = [
-    { id: 'me', label: '🎮 My preferences', show: true },
-    { id: 'workspace', label: '🏠 Workspace', show: canWs },
-    { id: 'team', label: '👥 Team & roles', show: canUsers },
-    { id: 'repos', label: '⎇ Repositories', show: canWs },
+  const nav: { id: Section; label: string; icon: IconName; show: boolean }[] = [
+    { id: 'me', label: 'My preferences', icon: 'user', show: true },
+    { id: 'workspace', label: 'Workspace', icon: 'home', show: canWs },
+    { id: 'team', label: 'Team & roles', icon: 'users', show: canUsers },
+    { id: 'repos', label: 'Repositories', icon: 'repo', show: canWs },
   ];
   return (
     <Modal title="SETTINGS" onClose={() => show(null)} wide>
@@ -405,7 +411,7 @@ export function SettingsModal({ section }: { section?: Section; onLoggedOut: () 
             .filter((n) => n.show)
             .map((n) => (
               <button key={n.id} aria-current={sec === n.id} onClick={() => setSec(n.id)}>
-                {n.label}
+                <Icon name={n.icon} /> {n.label}
               </button>
             ))}
         </nav>

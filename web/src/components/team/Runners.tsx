@@ -10,6 +10,7 @@ import { useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { Modal } from '../ui/Overlay';
 import { UNAVAILABLE, useAvailable, useFeatures } from '../../store/features';
+import { Icon } from '../ui/Icon';
 
 export const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/Flotapponnier/boba-agent/main/install.sh | sh';
 export const RUNNER_DOCS = 'https://github.com/Flotapponnier/boba-agent/blob/main/docs/RUNNER.md';
@@ -19,7 +20,7 @@ function Copyable({ text, label }: { text: string; label: string }) {
     <div className="copyable">
       <pre className="cmd-snippet">{text}</pre>
       <button className="btn sm" onClick={() => void navigator.clipboard?.writeText(text).then(() => toast(`${label} copied`, 'good'))}>
-        📋 Copy
+        <Icon name="copy" size={14} /> Copy
       </button>
     </div>
   );
@@ -181,7 +182,7 @@ function ConnectModal({ scope, onClose }: { scope: RunnerScope; onClose: () => v
           <p className="hint-text">
             It connects out over WebSocket, so it works behind a NAT or a laptop firewall. Full guide:{' '}
             <a href={RUNNER_DOCS} target="_blank" rel="noreferrer noopener">
-              docs/RUNNER.md ↗
+              docs/RUNNER.md <Icon name="external" size={12} />
             </a>
           </p>
           <div className="row end" style={{ marginTop: 12 }}>
@@ -211,14 +212,14 @@ export function RunnersPage() {
       <div className="page-head">
         <div>
           <div className="sign" style={{ textAlign: 'left' }}>
-            🖥 CONNECT YOUR CLAUDE CODE
+            <Icon name="terminal" size={24} /> CONNECT YOUR CLAUDE CODE
           </div>
           <p className="page-sub">Runners are the machines where bobas actually run Claude Code. Your runs go to your own machine when it's online, otherwise to a shared runner.</p>
         </div>
         <div className="row">
           {canRun && (
             <button className="btn gold" disabled={!avail} title={avail ? undefined : UNAVAILABLE} onClick={() => setConnect('personal')}>
-              🔌 Connect my machine
+              <Icon name="plug" size={14} /> Connect my machine
             </button>
           )}
           {canWs && (
@@ -234,15 +235,19 @@ export function RunnersPage() {
             New here? Install with <code>curl … install.sh | sh</code>, sign in to Claude Code, then Connect my machine.
           </span>
           <a className="btn sm" href={RUNNER_DOCS} target="_blank" rel="noreferrer noopener">
-            📖 Runner guide
+            <Icon name="book" size={14} /> Runner guide
           </a>
         </div>
         <div>
-          <b>🧋 Personal</b>
+          <b>
+            <Icon name="user" size={14} /> Personal
+          </b>
           <p>Your laptop, your Claude login. Runs only what you start. Your subscription is never shared.</p>
         </div>
         <div>
-          <b>🏠 Shared</b>
+          <b>
+            <Icon name="server" size={14} /> Shared
+          </b>
           <p>A server with an organisation API key (or Bedrock / Vertex). Runs everyone's work, quests and auto reviews.</p>
         </div>
       </div>

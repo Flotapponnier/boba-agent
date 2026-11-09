@@ -15,11 +15,13 @@ import { Drawer } from '../ui/Overlay';
 import { Sprite } from '../ui/Sprite';
 import { RunView, STATUS_LABEL } from '../panels/RunView';
 import { Discussion } from '../comments/Comments';
+import { Glyph, Icon } from '../ui/Icon';
+import type { IconName } from '../../lib/icons';
 
-export const OUTPUT_LABEL: Record<JobOutput, { icon: string; label: string }> = {
-  tickets: { icon: '📋', label: 'Files tickets' },
-  report: { icon: '📜', label: 'Writes a report' },
-  pull_request: { icon: '🔧', label: 'Opens a PR' },
+export const OUTPUT_LABEL: Record<JobOutput, { icon: IconName; label: string }> = {
+  tickets: { icon: 'clipboard', label: 'Files tickets' },
+  report: { icon: 'quest', label: 'Writes a report' },
+  pull_request: { icon: 'pr', label: 'Opens a PR' },
 };
 
 function useNow(ms = 1000) {
@@ -37,7 +39,7 @@ export async function runQuest(j: Job) {
   useBoard.getState().upsert({ entity: 'run', data: r });
   sfx('done', 0.7);
   fxBus.emit({ fx: 'quest_started', job_id: j.id });
-  toast(`Quest "${j.name}" accepted! ⚔️`, 'gold', useBoard.getState().agents[j.agent_id]?.sprite);
+  toast(`Quest "${j.name}" accepted`, 'gold', useBoard.getState().agents[j.agent_id]?.sprite);
 }
 
 async function toggle(j: Job) {
@@ -66,11 +68,12 @@ const QuestCard = memo(function QuestCard({ job: j, now }: { job: Job; now: numb
       style={{ '--ac': agent?.color ?? '#f39c12' } as CSSProperties}
     >
       <div className="quest-seal" aria-hidden="true">
-        {j.icon}
+        <Glyph value={j.icon} size={24} fallback="quest" />
       </div>
       <button className="quest-main" onClick={() => open({ kind: 'quest', id: j.id })} aria-label={`Open quest ${j.name}`}>
         <h3>{j.name}</h3>
-        <p className="quest-sched">⏳ {describe(j.schedule)}</p>
+        <p className="quest-sched">
+          <Icon name="hourglass" size={14} /> {describe(j.schedule)}</p>
         <div className="quest-next">
           {running ? (
             <span className="live">● On the quest: {run?.activity ?? 'working…'}</span>
@@ -99,7 +102,7 @@ const QuestCard = memo(function QuestCard({ job: j, now }: { job: Job; now: numb
           </span>
         )}
         <span className="chip" title={out.label}>
-          {out.icon} {out.label}
+          <Icon name={out.icon} size={12} /> {out.label}
         </span>
         <span className="grow" />
         {canManage && (
@@ -110,12 +113,12 @@ const QuestCard = memo(function QuestCard({ job: j, now }: { job: Job; now: numb
         )}
         {canManage && (
           <button className="icon-btn" onClick={() => show({ kind: 'quest-edit', id: j.id })} aria-label={`Edit ${j.name}`} title="Edit">
-            ✎
+            <Icon name="edit" size={14} />
           </button>
         )}
         {canRun && (
           <button className="btn gold sm" disabled={!avail || running || agent?.status !== 'idle'} title={!avail ? UNAVAILABLE : agent?.status !== 'idle' ? `${agent?.name ?? 'The agent'} is busy` : 'Run now'} onClick={() => void runQuest(j)}>
-            ▶ Run
+            <Icon name="play" size={12} /> Run
           </button>
         )}
       </div>
@@ -143,7 +146,7 @@ export function QuestBoard() {
       <div className="page-head">
         <div>
           <div className="sign" style={{ textAlign: 'left' }}>
-            📜 QUEST BOARD
+            <Icon name="quest" size={24} /> QUEST BOARD
           </div>
           <p className="page-sub">Recurring missions for your bobas: audits, triage, reports. They run on schedule, even while you sleep.</p>
         </div>
@@ -155,7 +158,7 @@ export function QuestBoard() {
       </div>
       {!avail && (
         <div className="sheet soon">
-          🚧 The quest board is coming with the next server update. Scheduled quests will show up here.
+          The quest board is coming with the next server update. Scheduled quests will show up here.
         </div>
       )}
       <div className="cork">
@@ -195,7 +198,7 @@ export function QuestPanel({ jobId }: { jobId: string }) {
   const run = runs.find((r) => r.id === sel) ?? runs.find(isActive) ?? runs[0];
 
   return (
-    <Drawer title={`${j.icon} ${j.name.toUpperCase()}`} onClose={() => ui.open(null)}>
+    <Drawer title={j.name.toUpperCase()} onClose={() => ui.open(null)}>
       <div className="sheet">
         <dl className="kv">
           <dt>HERO</dt>
@@ -206,7 +209,7 @@ export function QuestPanel({ jobId }: { jobId: string }) {
           <dd>{j.enabled ? (j.next_run_at ? `${new Date(j.next_run_at).toLocaleString()} (in ${countdown(j.next_run_at, now)})` : 'Manual') : 'Paused'}</dd>
           <dt>REWARD</dt>
           <dd>
-            {OUTPUT_LABEL[j.output].icon} {OUTPUT_LABEL[j.output].label}
+            <Icon name={OUTPUT_LABEL[j.output].icon} size={12} /> {OUTPUT_LABEL[j.output].label}
             {tab ? ` in ${tab.name}` : ''}
             {repo ? ` · ${repo.name}` : ''}
           </dd>
@@ -218,13 +221,13 @@ export function QuestPanel({ jobId }: { jobId: string }) {
         <div className="row" style={{ marginTop: 10 }}>
           {canRun && (
             <button className="btn gold sm" onClick={() => void runQuest(j)} disabled={runs.some(isActive)}>
-              ▶ Run now
+              <Icon name="play" size={12} /> Run now
             </button>
           )}
           {canManage && (
             <>
               <button className="btn sm" onClick={() => ui.show({ kind: 'quest-edit', id: j.id })}>
-                ✎ Edit
+                <Icon name="edit" size={14} /> Edit
               </button>
               <button
                 className="btn sm red"
@@ -237,7 +240,7 @@ export function QuestPanel({ jobId }: { jobId: string }) {
                   }
                 }}
               >
-                🗑 Delete
+                <Icon name="trash" size={14} /> Delete
               </button>
             </>
           )}
@@ -253,7 +256,7 @@ export function QuestPanel({ jobId }: { jobId: string }) {
         <div className="round-picker" style={{ flexWrap: 'wrap' }}>
           {runs.slice(0, 20).map((r) => (
             <button key={r.id} aria-pressed={run?.id === r.id} onClick={() => setSel(r.id)} title={STATUS_LABEL[r.status]}>
-              {isActive(r) ? '●' : r.status === 'succeeded' ? '✓' : r.status === 'failed' ? '✗' : '·'} {timeAgo(r.created_at, now)}
+              {isActive(r) ? '●' : r.status === 'succeeded' ? <Icon name="check" size={12} /> : r.status === 'failed' ? <Icon name="close" size={12} /> : '·'} {timeAgo(r.created_at, now)}
             </button>
           ))}
         </div>

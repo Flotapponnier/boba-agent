@@ -100,7 +100,7 @@ export function TicketModal({ tabId, columnId }: { tabId: string; columnId?: str
             Cancel
           </button>
           <button className="btn gold" disabled={busy || !f.title.trim()}>
-            📌 Pin it
+            Pin it
           </button>
         </div>
       </form>

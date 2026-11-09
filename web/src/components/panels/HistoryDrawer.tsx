@@ -51,7 +51,7 @@ export function HistoryDrawer() {
             <option value="">All tabs</option>
             {tabs.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.icon} {t.name}
+                {t.name}
               </option>
             ))}
           </select>

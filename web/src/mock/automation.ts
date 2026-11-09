@@ -146,7 +146,7 @@ export function plan(c: PlanCtx): { reply: string; actions: PlannedAction[]; que
       actions: [
         act(
           `Create quest "${name}" for ${who.name}`,
-          { action: 'create_job', job: { name, description: null, icon: output === 'tickets' ? '📋' : output === 'pull_request' ? '🔧' : '📜', agent_id: who.id, prompt: c.text, schedule, output, enabled: true, repo_id: tab?.repo_id ?? null, tab_id: tab?.id ?? null, skip_if_running: true } },
+          { action: 'create_job', job: { name, description: null, icon: output === 'tickets' ? 'clipboard' : output === 'pull_request' ? 'pr' : 'quest', agent_id: who.id, prompt: c.text, schedule, output, enabled: true, repo_id: tab?.repo_id ?? null, tab_id: tab?.id ?? null, skip_if_running: true } },
           'manage_automations',
         ),
       ],

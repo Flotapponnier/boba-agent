@@ -9,6 +9,7 @@ import { useCan, useTabs } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { Modal } from '../ui/Overlay';
 import { useUi } from '../../store/ui';
+import { Brand, Icon } from '../ui/Icon';
 
 /** GitHub sends people back to /settings/integrations after creating / installing the app. */
 export function handleGithubReturn(): boolean {
@@ -73,7 +74,7 @@ function RepoPicker({ onClose }: { onClose: () => void }) {
         <select value={syncTab} onChange={(e) => setSyncTab(e.target.value)} disabled={!withSync} style={{ width: 'auto' }} aria-label="Target tab">
           {tabs.map((t) => (
             <option key={t.id} value={t.id}>
-              {t.icon} {t.name}
+              {t.name}
             </option>
           ))}
         </select>
@@ -146,14 +147,14 @@ export function GithubCard() {
     };
   }, [load]);
 
-  if (!avail) return <div className="sheet soon">🐙 Connecting GitHub is {UNAVAILABLE.toLowerCase()}.</div>;
+  if (!avail) return <div className="sheet soon">Connecting GitHub is {UNAVAILABLE.toLowerCase()}.</div>;
   if (!st) return <div className="sheet gh-card muted">Checking GitHub…</div>;
 
   return (
     <article className={`sheet gh-card ${st.configured ? 'on' : ''}`}>
       <div className="row">
         <span className="gh-octo" aria-hidden="true">
-          🐙
+          <Brand name="github" size={28} mono />
         </span>
         <div className="grow">
           <h3>{st.configured ? 'GitHub is connected' : 'Connect GitHub'}</h3>
@@ -179,7 +180,7 @@ export function GithubCard() {
             </div>
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn gold" onClick={() => startSetup(org, name)}>
-                🐙 Create the Boba Agent GitHub App
+                <Brand name="github" size={14} mono /> Create the Boba Agent GitHub App
               </button>
               <span className="hint-text">You'll confirm on GitHub, pick the repos, and come back here.</span>
             </div>
@@ -192,13 +193,13 @@ export function GithubCard() {
           <div className="row" style={{ margin: '8px 0' }}>
             {st.html_url && (
               <a className="chip" href={st.html_url} target="_blank" rel="noreferrer noopener">
-                🤖 {st.slug}
+                <Icon name="robot" size={12} /> {st.slug}
               </a>
             )}
             <span className="grow" />
             {st.install_url && canAuto && (
               <a className="btn sm" href={st.install_url} target="_blank" rel="noreferrer noopener">
-                ➕ Install on more repos
+                <Icon name="plus" size={12} /> Install on more repos
               </a>
             )}
             {canWs && (

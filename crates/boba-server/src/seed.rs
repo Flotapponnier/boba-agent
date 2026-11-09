@@ -287,9 +287,9 @@ pub async fn seed_demo(state: &SharedState, owner: Id) -> anyhow::Result<()> {
 
     let mut tabs = Vec::new();
     for (i, (name, icon, color)) in [
-        ("Dev", "🧋", "#c98b5a"),
-        ("SEO", "🔎", "#f28cb1"),
-        ("Infra", "🛠️", "#4a4a5a"),
+        ("Dev", "boba", "#c98b5a"),
+        ("SEO", "search", "#f28cb1"),
+        ("Infra", "tools", "#4a4a5a"),
     ]
     .into_iter()
     .enumerate()

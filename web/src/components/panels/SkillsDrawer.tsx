@@ -9,6 +9,7 @@ import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { Markdown } from '../ui/Markdown';
 import { Drawer } from '../ui/Overlay';
+import { Icon } from '../ui/Icon';
 
 const SOURCES: { key: SkillSource; label: string; hint: string }[] = [
   { key: 'boba', label: 'Boba', hint: 'Managed here, editable' },
@@ -102,7 +103,7 @@ export function SkillsDrawer({ initialId }: { initialId?: string }) {
         ) : sel ? (
           <div>
             <button className="btn sm ghost" onClick={() => { setSel(null); setMode('view'); }}>
-              ← All skills
+              <Icon name="arrow-left" size={12} /> All skills
             </button>
             {!detail ? (
               <p className="muted" style={{ marginTop: 10 }}>
@@ -149,7 +150,7 @@ export function SkillsDrawer({ initialId }: { initialId?: string }) {
                 {canManage && detail.skill.editable && (
                   <div className="row end" style={{ marginTop: 12 }}>
                     <button className="btn gold sm" onClick={() => setMode('edit')}>
-                      ✏ Edit
+                      <Icon name="edit" size={14} /> Edit
                     </button>
                   </div>
                 )}
@@ -191,7 +192,7 @@ export function SkillsDrawer({ initialId }: { initialId?: string }) {
                     {g.skills.map((s) => (
                       <button key={s.id} className="skill-card" onClick={() => setSel(s.id)}>
                         <b>{s.name}</b>
-                        <span>{s.editable ? '✏' : '🔒'}</span>
+                        <Icon name={s.editable ? 'edit' : 'lock'} size={14} title={s.editable ? 'Editable' : 'Read-only'} />
                         <p>{s.description}</p>
                         {usedBy(s.id).length > 0 && (
                           <span className="users">

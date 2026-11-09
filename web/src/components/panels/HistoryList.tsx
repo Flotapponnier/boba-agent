@@ -6,43 +6,45 @@ import { clock, dayLabel, timeAgo } from '../../lib/format';
 import { errorText } from '../../store/actions';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
+import { Icon } from '../ui/Icon';
+import type { IconName } from '../../lib/icons';
 
-export const KIND_ICON: Partial<Record<HistoryKind, string>> = {
-  ticket_created: '📌',
-  ticket_updated: '✏️',
-  ticket_moved: '➡️',
-  ticket_deleted: '🗑️',
-  agent_created: '🎉',
-  agent_updated: '🛠️',
-  agent_deleted: '👋',
-  agent_level_up: '⭐',
-  run_started: '🏃',
-  run_waiting: '✋',
-  run_succeeded: '✅',
-  run_failed: '💥',
-  run_cancelled: '⏹️',
-  pr_opened: '📬',
-  review_approved: '🧋',
-  review_changes_requested: '🔁',
-  skill_created: '📚',
-  skill_updated: '📚',
-  tab_created: '🗂️',
-  tab_updated: '🗂️',
-  tab_deleted: '🗂️',
-  user_joined: '🙋',
-  comment: '💬',
-  command_issued: '🎙️',
-  command_executed: '✨',
-  job_created: '📜',
-  job_updated: '📜',
-  job_deleted: '📜',
-  job_run_started: '⚔️',
-  job_run_finished: '🏆',
-  ticket_imported: '🐙',
-  repo_synced: '🔄',
-  connector_created: '🌀',
-  connector_updated: '🌀',
-  connector_deleted: '🌀',
+export const KIND_ICON: Partial<Record<HistoryKind, IconName>> = {
+  ticket_created: 'note',
+  ticket_updated: 'edit',
+  ticket_moved: 'arrow-right',
+  ticket_deleted: 'trash',
+  agent_created: 'user-plus',
+  agent_updated: 'tools',
+  agent_deleted: 'logout',
+  agent_level_up: 'star',
+  run_started: 'play',
+  run_waiting: 'hand',
+  run_succeeded: 'check',
+  run_failed: 'warn',
+  run_cancelled: 'close',
+  pr_opened: 'pr',
+  review_approved: 'check',
+  review_changes_requested: 'refresh',
+  skill_created: 'book',
+  skill_updated: 'book',
+  tab_created: 'layout',
+  tab_updated: 'layout',
+  tab_deleted: 'layout',
+  user_joined: 'user-plus',
+  comment: 'chat',
+  command_issued: 'mic',
+  command_executed: 'sparkle',
+  job_created: 'quest',
+  job_updated: 'quest',
+  job_deleted: 'quest',
+  job_run_started: 'sword',
+  job_run_finished: 'trophy',
+  ticket_imported: 'repo',
+  repo_synced: 'refresh',
+  connector_created: 'portal',
+  connector_updated: 'portal',
+  connector_deleted: 'portal',
 };
 
 export type Category = 'all' | 'tickets' | 'runs' | 'reviews' | 'agents' | 'automation' | 'team';
@@ -72,8 +74,12 @@ function Actor({ e }: { e: HistoryEvent }) {
   );
   return (
     <span className="h-icon" aria-hidden="true">
-      {sprite ? <img src={e.actor_kind === 'agent' ? bodyUrl(sprite) : avatarUrl(sprite)} alt="" /> : <span>{KIND_ICON[e.kind] ?? '•'}</span>}
-      {sprite && <span className="k">{KIND_ICON[e.kind]}</span>}
+      {sprite ? <img src={e.actor_kind === 'agent' ? bodyUrl(sprite) : avatarUrl(sprite)} alt="" /> : <Icon name={KIND_ICON[e.kind] ?? 'info'} size={18} />}
+      {sprite && KIND_ICON[e.kind] && (
+        <span className="k">
+          <Icon name={KIND_ICON[e.kind] as IconName} size={12} />
+        </span>
+      )}
     </span>
   );
 }

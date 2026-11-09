@@ -85,11 +85,11 @@ export const MODELS: { id: string | null; label: string }[] = [
 
 /** One-click `--allowedTools` presets so test/build commands don't stop on a permission prompt. */
 export const COMMAND_PRESETS: { stack: string; icon: string; tools: string[] }[] = [
-  { stack: 'Rust', icon: '🦀', tools: ['Bash(cargo test:*)', 'Bash(cargo build:*)', 'Bash(cargo clippy:*)', 'Bash(cargo fmt:*)'] },
-  { stack: 'Node', icon: '🟩', tools: ['Bash(pnpm test:*)', 'Bash(pnpm lint:*)', 'Bash(pnpm build:*)', 'Bash(pnpm typecheck:*)', 'Bash(npm test:*)', 'Bash(npx vitest:*)'] },
-  { stack: 'Python', icon: '🐍', tools: ['Bash(python3 -m pytest:*)', 'Bash(pytest:*)', 'Bash(ruff check:*)', 'Bash(mypy:*)'] },
-  { stack: 'Go', icon: '🐹', tools: ['Bash(go test:*)', 'Bash(go build:*)', 'Bash(go vet:*)'] },
-  { stack: 'Git (read)', icon: '🌿', tools: ['Bash(git diff:*)', 'Bash(git status:*)', 'Bash(git log:*)'] },
+  { stack: 'Rust', icon: 'brand:rust', tools: ['Bash(cargo test:*)', 'Bash(cargo build:*)', 'Bash(cargo clippy:*)', 'Bash(cargo fmt:*)'] },
+  { stack: 'Node', icon: 'brand:node', tools: ['Bash(pnpm test:*)', 'Bash(pnpm lint:*)', 'Bash(pnpm build:*)', 'Bash(pnpm typecheck:*)', 'Bash(npm test:*)', 'Bash(npx vitest:*)'] },
+  { stack: 'Python', icon: 'brand:python', tools: ['Bash(python3 -m pytest:*)', 'Bash(pytest:*)', 'Bash(ruff check:*)', 'Bash(mypy:*)'] },
+  { stack: 'Go', icon: 'brand:go', tools: ['Bash(go test:*)', 'Bash(go build:*)', 'Bash(go vet:*)'] },
+  { stack: 'Git (read)', icon: 'brand:git', tools: ['Bash(git diff:*)', 'Bash(git status:*)', 'Bash(git log:*)'] },
 ];
 
 /** `cargo test --all` → `Bash(cargo test:*)` (first two words, or one for single-word commands). */

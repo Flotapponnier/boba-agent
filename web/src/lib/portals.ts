@@ -3,6 +3,7 @@ import type { ConnectorKind, McpTransport } from '../api/types';
 export interface PortalPreset {
   kind: ConnectorKind;
   name: string;
+  /** Icon value for `<Glyph>`: an icon name or `brand:<name>`. */
   icon: string;
   color: string;
   blurb: string;
@@ -17,7 +18,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'google_search_console',
     name: 'Search Console',
-    icon: '🔎',
+    icon: 'brand:search-console',
     color: '#4285f4',
     blurb: 'Clicks, impressions, queries and indexing issues for your sites.',
     transport: { type: 'stdio', command: 'npx', args: ['-y', 'mcp-server-gsc'] },
@@ -26,7 +27,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'google_workspace',
     name: 'Google Workspace',
-    icon: '📧',
+    icon: 'brand:google',
     color: '#34a853',
     blurb: 'Gmail, Calendar, Drive and Docs.',
     transport: { type: 'stdio', command: 'npx', args: ['-y', '@googleworkspace/mcp'] },
@@ -39,7 +40,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'linear',
     name: 'Linear',
-    icon: '📐',
+    icon: 'brand:linear',
     color: '#5e6ad2',
     blurb: 'Read and file Linear issues and projects.',
     transport: { type: 'http', url: 'https://mcp.linear.app/mcp', header_secrets: { Authorization: 'LINEAR_API_KEY' } },
@@ -48,7 +49,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'slack',
     name: 'Slack',
-    icon: '💬',
+    icon: 'slack',
     color: '#4a154b',
     blurb: 'Read channels and post updates.',
     transport: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-slack'] },
@@ -60,7 +61,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'sentry',
     name: 'Sentry',
-    icon: '🚨',
+    icon: 'brand:sentry',
     color: '#362d59',
     blurb: 'Errors and issues, to turn crashes into tickets.',
     transport: { type: 'http', url: 'https://mcp.sentry.dev/mcp', header_secrets: { Authorization: 'SENTRY_TOKEN' } },
@@ -69,7 +70,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'notion',
     name: 'Notion',
-    icon: '📓',
+    icon: 'brand:notion',
     color: '#000000',
     blurb: 'Search and read pages and databases.',
     transport: { type: 'http', url: 'https://mcp.notion.com/mcp', header_secrets: { Authorization: 'NOTION_TOKEN' } },
@@ -78,7 +79,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'web_search',
     name: 'Web search',
-    icon: '🌍',
+    icon: 'brand:brave',
     color: '#ff7a00',
     blurb: 'Search the web and read pages.',
     transport: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-brave-search'] },
@@ -87,7 +88,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'postgres',
     name: 'Postgres',
-    icon: '🐘',
+    icon: 'brand:postgres',
     color: '#336791',
     blurb: 'Read-only SQL on a database.',
     transport: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-postgres', '${DATABASE_URL}'] },
@@ -96,7 +97,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'github',
     name: 'GitHub',
-    icon: '🐙',
+    icon: 'brand:github',
     color: '#24292f',
     blurb: 'Issues, PRs and code search beyond the repo sync.',
     transport: { type: 'http', url: 'https://api.githubcopilot.com/mcp/', header_secrets: { Authorization: 'GITHUB_TOKEN' } },
@@ -105,7 +106,7 @@ export const PRESETS: PortalPreset[] = [
   {
     kind: 'custom_mcp',
     name: 'Custom MCP',
-    icon: '🌀',
+    icon: 'brand:mcp',
     color: '#9b59b6',
     blurb: 'Any MCP server: a command on the runner or a remote URL.',
     transport: { type: 'stdio', command: '', args: [] },

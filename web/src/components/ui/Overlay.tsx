@@ -1,5 +1,6 @@
 import { motion } from 'motion/react';
 import { useEffect, useRef, type ReactNode } from 'react';
+import { Icon } from './Icon';
 
 function useEscape(onClose: () => void) {
   useEffect(() => {
@@ -45,7 +46,7 @@ export function Modal({ title, onClose, children, wide, footer }: { title: strin
         <div className="modal-head">
           <div className="sign">{title}</div>
           <button className="icon-btn close-x" onClick={onClose} aria-label="Close">
-            ✕
+            <Icon name="close" size={16} />
           </button>
         </div>
         <div className="sheet">{children}</div>
@@ -77,7 +78,7 @@ export function Drawer({ title, onClose, children, head }: { title: string; onCl
           <div className="sign">{title}</div>
           {head}
           <button className="icon-btn close-x" onClick={onClose} aria-label="Close">
-            ✕
+            <Icon name="close" size={16} />
           </button>
         </div>
         <div className="drawer-body">{children}</div>

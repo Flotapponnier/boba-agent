@@ -178,7 +178,7 @@ pub async fn create_tab(
     let tab = Tab {
         id,
         name,
-        icon: req.icon.unwrap_or_else(|| "🧋".into()),
+        icon: req.icon.unwrap_or_else(|| "boba".into()),
         color: req.color.unwrap_or_else(|| "#c98b5a".into()),
         position,
         repo_id: req.repo_id,

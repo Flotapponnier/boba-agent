@@ -7,6 +7,8 @@ import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { Modal } from '../ui/Overlay';
 import { Sprite } from '../ui/Sprite';
+import { Glyph } from '../ui/Icon';
+import { preset } from '../../lib/portals';
 
 const PROMPTS: Record<string, string> = {
   Dev: 'You are {name}, a careful full-stack developer. Work only in your worktree. Write a failing test first, keep the diff focused on the ticket, and open a clean PR with a clear summary.',
@@ -209,7 +211,7 @@ export function AgentEditor({ agentId }: { agentId?: string }) {
                 const on = f.connector_ids.includes(c.id);
                 return (
                   <button type="button" key={c.id} className={`chip ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => set('connector_ids', on ? f.connector_ids.filter((x) => x !== c.id) : [...f.connector_ids, c.id])}>
-                    🌀 {c.name}
+                    <Glyph value={preset(c.kind).icon} size={12} /> {c.name}
                   </button>
                 );
               })}
@@ -266,7 +268,7 @@ export function AgentEditor({ agentId }: { agentId?: string }) {
                     title={p.tools.join('\n')}
                     onClick={() => set('allowed_tools', on ? f.allowed_tools.filter((t) => !p.tools.includes(t)) : [...new Set([...f.allowed_tools, ...p.tools])])}
                   >
-                    {p.icon} {p.stack}
+                    <Glyph value={p.icon} size={12} /> {p.stack}
                   </button>
                 );
               })}
@@ -314,7 +316,7 @@ export function AgentEditor({ agentId }: { agentId?: string }) {
               Cancel
             </button>
             <button className="btn gold" disabled={busy || !f.name.trim()}>
-              {existing ? 'Save' : '🎉 Recruit!'}
+              {existing ? 'Save' : 'Recruit'}
             </button>
           </div>
         </div>
