@@ -289,17 +289,18 @@ fn esc(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// `GET /api/github/app/setup` [ManageAutomations]: a page that posts the app manifest to
-/// GitHub. Florent clicks "Create GitHub App", then "Install".
-pub async fn setup(
-    State(state): State<SharedState>,
-    me: Auth,
-    Query(q): Query<SetupQuery>,
-) -> AppResult<Response> {
-    me.require(Permission::ManageAutomations)?;
+/// What GitHub needs to create the app: where to post, and the manifest.
+pub struct Prepared {
+    pub name: String,
+    pub action_url: String,
+    pub manifest: Value,
+    pub warnings: Vec<String>,
+}
+
+/// Build the manifest and mint a one-time `state` (shared by the HTML and JSON routes).
+pub fn prepare(state: &SharedState, org: Option<&str>, name: Option<&str>) -> Prepared {
     let public = state.cfg.public_url.trim_end_matches('/').to_string();
-    let name = q
-        .name
+    let name = name
         .map(|n| n.trim().chars().take(34).collect::<String>())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "Boba Agent".into());
@@ -323,19 +324,69 @@ pub async fn setup(
         m.insert(token.clone(), Instant::now());
     }
     let web = state.cfg.github_web.trim_end_matches('/');
-    let action = match q.org.as_deref().map(str::trim).filter(|o| !o.is_empty()) {
+    let action_url = match org.map(str::trim).filter(|o| !o.is_empty()) {
         Some(org) => format!(
             "{web}/organizations/{}/settings/apps/new?state={token}",
             urlencoding::encode(org)
         ),
         None => format!("{web}/settings/apps/new?state={token}"),
     };
-    let local = public.contains("localhost") || public.contains("127.0.0.1");
-    let warning = if local {
-        "<p class=\"warn\">BOBA_PUBLIC_URL is a local address: GitHub can create the app, but its webhooks will not reach this server.</p>"
-    } else {
-        ""
-    };
+    let mut warnings = Vec::new();
+    if public.contains("localhost") || public.contains("127.0.0.1") {
+        warnings.push(
+            "BOBA_PUBLIC_URL is a local address: GitHub can create the app, but its webhooks will not reach this server."
+                .to_string(),
+        );
+    } else if !public.starts_with("https://") {
+        warnings.push(
+            "BOBA_PUBLIC_URL is not https: GitHub will refuse to deliver webhooks to it."
+                .to_string(),
+        );
+    }
+    Prepared {
+        name,
+        action_url,
+        manifest,
+        warnings,
+    }
+}
+
+/// `GET /api/github/app/manifest` [ManageAutomations]: the same as the setup page, as data,
+/// for the SPA to render its own page and post `manifest` to `action_url`.
+pub async fn manifest(
+    State(state): State<SharedState>,
+    me: Auth,
+    Query(q): Query<SetupQuery>,
+) -> AppResult<Json<Value>> {
+    me.require(Permission::ManageAutomations)?;
+    let p = prepare(&state, q.org.as_deref(), q.name.as_deref());
+    Ok(Json(json!({
+        "name": p.name,
+        "action_url": p.action_url,
+        "manifest": p.manifest,
+        "warnings": p.warnings,
+    })))
+}
+
+/// `GET /api/github/app/setup` [ManageAutomations]: a page that posts the app manifest to
+/// GitHub. Florent clicks "Create GitHub App", then "Install". (The SPA renders its own page
+/// from `/api/github/app/manifest`; this one stays for direct links.)
+pub async fn setup(
+    State(state): State<SharedState>,
+    me: Auth,
+    Query(q): Query<SetupQuery>,
+) -> AppResult<Response> {
+    me.require(Permission::ManageAutomations)?;
+    let Prepared {
+        name,
+        action_url: action,
+        manifest,
+        warnings,
+    } = prepare(&state, q.org.as_deref(), q.name.as_deref());
+    let warning: String = warnings
+        .iter()
+        .map(|w| format!("<p class=\"warn\">{}</p>", esc(w)))
+        .collect();
     let page = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>Connect GitHub</title>\
 <style>body{{font-family:system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#3b2a1a}}\
