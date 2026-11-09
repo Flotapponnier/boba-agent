@@ -441,6 +441,9 @@ pub async fn move_ticket(
         if to.kind == ColumnKind::Review {
             orchestrator::maybe_auto_review_locked(&state, t.id).await;
         }
+        if to.kind == ColumnKind::Done {
+            crate::sync::ticket_done(&state, t.clone());
+        }
     }
     Ok(Json(state.db.ticket(id).await?.unwrap_or(t)))
 }

@@ -63,6 +63,8 @@ pub fn api() -> Router<SharedState> {
         )
         .route("/health", get(|| async { "ok" }))
         .route("/mcp", post(crate::board_tools::endpoint))
+        .route("/repos/{id}/sync", post(crate::sync::sync_now))
+        .route("/github/webhook", post(crate::sync::webhook))
         .route("/command", post(crate::concierge::command))
         .route("/command/execute", post(crate::concierge::execute))
         // quests

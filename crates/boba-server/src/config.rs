@@ -23,6 +23,8 @@ pub struct Config {
     /// `BOBA_LOCAL_RUNNER_OWNER=<email>`: the built-in Claude runner only runs this user's
     /// work (required with a subscription).
     pub local_runner_owner: Option<String>,
+    /// `BOBA_GITHUB_WEBHOOK_SECRET`: enables `POST /api/github/webhook` (HMAC-checked).
+    pub github_webhook_secret: Option<String>,
 }
 
 impl Config {
@@ -67,6 +69,9 @@ impl Config {
             secure_cookies,
             allow_bypass: env_set("BOBA_ALLOW_BYPASS"),
             claude_subscription,
+            github_webhook_secret: std::env::var("BOBA_GITHUB_WEBHOOK_SECRET")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
             local_runner_owner: std::env::var("BOBA_LOCAL_RUNNER_OWNER")
                 .ok()
                 .map(|s| s.trim().to_lowercase())
@@ -86,6 +91,7 @@ impl Config {
             allow_bypass: false,
             claude_subscription: false,
             local_runner_owner: None,
+            github_webhook_secret: None,
         }
     }
 

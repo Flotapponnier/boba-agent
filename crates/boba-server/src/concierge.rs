@@ -513,6 +513,15 @@ async fn run_action(
         RunJob { job_id } => Entity::Run(crate::jobs::run_now(st(), me(), Path(job_id)).await?.0),
         CreateTab { tab } => Entity::Tab(board::create_tab(st(), me(), Json(tab)).await?.0),
         CancelRun { run_id } => Entity::Run(work::cancel_run(st(), me(), Path(run_id)).await?.0),
-        SyncRepo { .. } => return Err(AppError::bad("repository sync is not available yet")),
+        SyncRepo { repo_id } => {
+            let _report = crate::sync::sync_now(st(), me(), Path(repo_id)).await?;
+            Entity::Repo(
+                state
+                    .db
+                    .repo(repo_id)
+                    .await?
+                    .ok_or(AppError::NotFound("repo"))?,
+            )
+        }
     }))
 }

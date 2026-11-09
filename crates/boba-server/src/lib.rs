@@ -24,6 +24,7 @@ pub mod seed;
 pub mod skills;
 pub mod speech;
 pub mod state;
+pub mod sync;
 pub mod web;
 pub mod ws;
 
@@ -51,6 +52,7 @@ pub async fn build(
     orchestrator::recover(&state).await?;
     concierge::ensure(&state).await?;
     scheduler::spawn(state.clone());
+    sync::spawn_poller(state.clone());
     let router = router(state.clone());
     Ok((state, router))
 }

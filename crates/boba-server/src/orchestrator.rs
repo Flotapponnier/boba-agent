@@ -1266,6 +1266,15 @@ async fn finish_inner(
         return Ok(());
     }
     if let Some(tid) = landed_in {
+        // Back to GitHub (comments / reviews; closing the issue once it is Done).
+        crate::sync::after_run(state, run.clone());
+        if let Ok(Some(t)) = state.db.ticket(tid).await {
+            if let Ok(Some(c)) = state.db.column(t.column_id).await {
+                if c.kind == ColumnKind::Done {
+                    crate::sync::ticket_done(state, t);
+                }
+            }
+        }
         maybe_auto_review_locked(state, tid).await;
     }
     // The agent is free again: it may have reviews waiting; a runner slot is free too.
