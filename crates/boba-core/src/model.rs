@@ -321,6 +321,8 @@ pub enum RunKind {
     Review,
     /// A scheduled/on-demand job run (no ticket).
     Job,
+    /// Command bar / voice: the concierge turns a sentence into a `CommandPlan` (read-only run).
+    Command,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

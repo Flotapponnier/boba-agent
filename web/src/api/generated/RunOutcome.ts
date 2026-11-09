@@ -10,4 +10,8 @@ verdict: ReviewVerdict | null,
 /**
  * Review runs: feedback to send back to the author when changes are requested.
  */
-feedback: string | null, error: string | null, };
+feedback: string | null, error: string | null, 
+/**
+ * Command runs: the parsed ```boba-plan``` block.
+ */
+plan: unknown, };

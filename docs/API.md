@@ -89,3 +89,6 @@ Server → client `ServerMessage`, client → server `ClientMessage` (see `event
 | GET | `/api/jobs/:id/runs` [View] | → `Run[]` |
 | POST | `/api/jobs/preview-schedule` [View] | `Schedule` → `SchedulePreview` |
 | POST | `/api/mcp` | MCP streamable HTTP for agents, bearer = per-run token (not a user session) |
+| POST | `/api/command` [View] | `CommandRequest` → `Run` (plan arrives as `ServerMessage::CommandPlan`) |
+| POST | `/api/command/execute` [per action] | `ExecuteCommand` → `ActionResult[]` |
+| POST | `/api/speech/transcribe` [View] | audio body → `Transcript` (only with `SpeechProvider::Whisper`) |

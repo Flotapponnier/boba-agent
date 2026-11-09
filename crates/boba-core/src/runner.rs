@@ -21,6 +21,11 @@ pub struct RunSpec {
     pub ticket: Option<TicketSpec>,
     /// Set for job runs.
     pub job: Option<JobSpec>,
+    /// Set for command runs: the user's sentence + a JSON digest of the board (tabs, columns,
+    /// agents, jobs, repos, connectors, skill ids/names) so the concierge can resolve names to ids.
+    /// The concierge is read-only and must end with a ```boba-plan``` JSON block (a `CommandPlan`
+    /// without run_id/required/allowed; the server fills those).
+    pub command: Option<CommandSpec>,
     /// None = job without repo: the runner uses a scratch dir under its data dir.
     pub repo: Option<RepoSpec>,
     /// MCP servers from the agent's connectors, secrets resolved (runner side only, never logged).
@@ -64,6 +69,14 @@ pub struct TicketSpec {
     pub review_rounds: u32,
     /// Origin; for imported PRs the runner reviews `head_branch` instead of a boba branch.
     pub source: crate::automation::TicketSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandSpec {
+    pub text: String,
+    pub voice: bool,
+    pub user_name: String,
+    pub board_digest: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +166,9 @@ pub struct RunOutcome {
     /// Review runs: feedback to send back to the author when changes are requested.
     pub feedback: Option<String>,
     pub error: Option<String>,
+    /// Command runs: the parsed ```boba-plan``` block.
+    #[ts(type = "unknown")]
+    pub plan: Option<serde_json::Value>,
 }
 
 /// Remote runner protocol over WebSocket `/api/runners/ws` (bearer runner token).

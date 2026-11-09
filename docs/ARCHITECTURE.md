@@ -126,3 +126,18 @@ ticks every 15 s, computes `next_run_at`, and starts a `Run{kind: Job, ticket_id
 `skip_if_running` avoids overlaps; missed ticks while the server was down run once at startup.
 "Run now" = `POST /api/jobs/:id/run`. A job run's report is stored in `Job.last_result` and passed to
 the next run as `previous_result` so recurring jobs don't repeat themselves.
+
+### Command bar & voice (the Concierge)
+`⌘K` / `Ctrl+K` opens the command bar; holding `Space` (when no input is focused) or the mic button
+records a voice command. Speech-to-text is `WorkspaceSettings.speech`: the browser's Web Speech API
+by default, or a self-hosted Whisper-compatible endpoint behind `POST /api/speech/transcribe`.
+
+`POST /api/command` starts a read-only `Run{kind: Command}` of the **Concierge** (a built-in agent).
+Its `RunSpec.command` carries the sentence, the UI context (current tab / ticket / agent) and a board
+digest so it can resolve "Pinky", "the SEO tab" or "this ticket" to ids. It must end with a
+```` ```boba-plan ```` JSON block → the server validates it into a `CommandPlan`, marks each action
+`allowed` against **the requesting user's** permissions, and sends `ServerMessage::CommandPlan` to that
+user only. The UI shows one confirmation card per action (editable); nothing happens until the user
+confirms via `POST /api/command/execute`, which runs the actions with the user's own permissions and
+records `CommandIssued` / `CommandExecuted` in the history. The concierge never gets write tools, so a
+prompt-injected sentence cannot act on its own.

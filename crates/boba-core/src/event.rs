@@ -41,6 +41,8 @@ pub enum HistoryKind {
     TabUpdated,
     TabDeleted,
     UserJoined,
+    CommandIssued,
+    CommandExecuted,
     JobCreated,
     JobUpdated,
     JobDeleted,
@@ -185,6 +187,10 @@ pub enum ServerMessage {
     /// Who is looking at the board right now.
     Presence {
         users: Vec<PresenceUser>,
+    },
+    /// Concierge result, sent only to the user who issued the command.
+    CommandPlan {
+        plan: crate::api::CommandPlan,
     },
     Error {
         message: String,
