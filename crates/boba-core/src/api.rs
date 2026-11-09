@@ -91,6 +91,21 @@ pub struct InviteResponse {
     pub invite_url: String,
 }
 
+/// `POST /api/auth/accept-invite`
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AcceptInvite {
+    pub token: String,
+    pub password: String,
+}
+
+/// `PATCH /api/users/:id`
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateUser {
+    pub role: Role,
+}
+
 // ---------------------------------------------------------------- agents
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

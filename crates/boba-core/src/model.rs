@@ -203,7 +203,9 @@ pub struct Agent {
     pub allowed_tools: Vec<String>,
     pub max_turns: Option<u32>,
     // --- game stats (server-computed) ---
+    /// XP inside the current level: progress bar = xp / xp_for_next_level(level).
     pub xp: u32,
+    /// Starts at 1.
     pub level: u32,
     pub runs_completed: u32,
     pub prs_approved: u32,
