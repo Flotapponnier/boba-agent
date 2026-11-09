@@ -137,6 +137,7 @@ pub fn outcome(status: RunStatus) -> RunOutcome {
         verdict: None,
         feedback: None,
         error: None,
+        plan: None,
     }
 }
 

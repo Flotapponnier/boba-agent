@@ -31,6 +31,14 @@ system_prompt: string,
  */
 skill_ids: Array<string>, 
 /**
+ * Connectors (MCP servers) this agent can use.
+ */
+connector_ids: Array<string>, 
+/**
+ * Give the agent the board tools (create/update/comment tickets) during its runs.
+ */
+board_tools: boolean, 
+/**
  * e.g. "claude-sonnet-5-5". None = Claude Code default.
  */
 model: string | null, permission_mode: PermissionMode, 

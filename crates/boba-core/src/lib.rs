@@ -14,6 +14,7 @@
 //! and ping every workstream (see CONTRIBUTING.md).
 
 pub mod api;
+pub mod automation;
 pub mod event;
 pub mod model;
 pub mod runner;

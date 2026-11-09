@@ -3,4 +3,4 @@
 /**
  * Fine-grained permissions checked by the server. `Role::grants` is the default mapping.
  */
-export type Permission = "view" | "edit_tickets" | "run_agents" | "manage_agents" | "manage_skills" | "manage_workspace" | "manage_users";
+export type Permission = "view" | "edit_tickets" | "run_agents" | "manage_agents" | "manage_skills" | "manage_workspace" | "manage_users" | "manage_automations";

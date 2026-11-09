@@ -39,6 +39,8 @@ pub enum Permission {
     ManageWorkspace,
     /// Invite users, change roles.
     ManageUsers,
+    /// Repo sync settings, connectors (and their secrets), scheduled jobs.
+    ManageAutomations,
 }
 
 impl Role {
@@ -128,6 +130,9 @@ pub struct Repo {
     pub default_branch: String,
     /// Which runner hosts this repo (multi-server). None = local runner.
     pub runner_id: Option<Id>,
+    /// GitHub issue/PR sync. Default: disabled.
+    #[serde(default)]
+    pub sync: crate::automation::RepoSync,
 }
 
 /// A machine that executes runs. v1 ships the in-process "local" runner;
@@ -196,6 +201,12 @@ pub struct Agent {
     pub system_prompt: String,
     /// Skill ids this agent may use.
     pub skill_ids: Vec<Id>,
+    /// Connectors (MCP servers) this agent can use.
+    #[serde(default)]
+    pub connector_ids: Vec<Id>,
+    /// Give the agent the board tools (create/update/comment tickets) during its runs.
+    #[serde(default)]
+    pub board_tools: bool,
     /// e.g. "claude-sonnet-5-5". None = Claude Code default.
     pub model: Option<String>,
     pub permission_mode: PermissionMode,
@@ -292,6 +303,9 @@ pub struct Ticket {
     /// Last reviewer feedback when changes were requested.
     pub review_feedback: Option<String>,
     pub review_rounds: u32,
+    /// Origin (manual, GitHub issue/PR, job, agent).
+    #[serde(default)]
+    pub source: crate::automation::TicketSource,
     pub created_by: Option<Id>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -305,6 +319,10 @@ pub enum RunKind {
     Work,
     /// Read-only review of the ticket's PR; must end with a verdict.
     Review,
+    /// A scheduled/on-demand job run (no ticket).
+    Job,
+    /// Command bar / voice: the concierge turns a sentence into a `CommandPlan` (read-only run).
+    Command,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -342,7 +360,10 @@ pub enum ReviewVerdict {
 #[ts(export)]
 pub struct Run {
     pub id: Id,
-    pub ticket_id: Id,
+    /// None for job runs.
+    pub ticket_id: Option<Id>,
+    /// Set for job runs.
+    pub job_id: Option<Id>,
     pub agent_id: Id,
     pub kind: RunKind,
     pub status: RunStatus,

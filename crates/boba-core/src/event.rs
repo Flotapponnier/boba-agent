@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::automation::*;
 use crate::model::*;
 
 /// What happened, for the history timeline ("everything is visible").
@@ -40,6 +41,18 @@ pub enum HistoryKind {
     TabUpdated,
     TabDeleted,
     UserJoined,
+    CommandIssued,
+    CommandExecuted,
+    JobCreated,
+    JobUpdated,
+    JobDeleted,
+    JobRunStarted,
+    JobRunFinished,
+    TicketImported,
+    RepoSynced,
+    ConnectorCreated,
+    ConnectorUpdated,
+    ConnectorDeleted,
     Comment,
 }
 
@@ -86,6 +99,8 @@ pub enum Entity {
     Repo(Repo),
     User(User),
     Runner(RunnerInfo),
+    Job(Job),
+    Connector(Connector),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -100,6 +115,8 @@ pub enum EntityKind {
     Repo,
     User,
     Runner,
+    Job,
+    Connector,
 }
 
 /// Purely cosmetic one-shot effects so every connected screen celebrates together.
@@ -170,6 +187,10 @@ pub enum ServerMessage {
     /// Who is looking at the board right now.
     Presence {
         users: Vec<PresenceUser>,
+    },
+    /// Concierge result, sent only to the user who issued the command.
+    CommandPlan {
+        plan: crate::api::CommandPlan,
     },
     Error {
         message: String,

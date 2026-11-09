@@ -22,7 +22,7 @@ fn spec(kind: RunKind, mode: PermissionMode) -> RunSpec {
             allowed_tools: vec![],
             max_turns: None,
         },
-        ticket: TicketSpec {
+        ticket: Some(TicketSpec {
             id: Uuid::now_v7(),
             number: 42,
             title: "Add dark mode toggle to settings page".into(),
@@ -33,16 +33,25 @@ fn spec(kind: RunKind, mode: PermissionMode) -> RunSpec {
             pr_url: None,
             review_feedback: None,
             review_rounds: 0,
-        },
-        repo: RepoSpec {
+            source: Default::default(),
+        }),
+        job: None,
+        command: None,
+        repo: Some(RepoSpec {
             path: "/srv/repos/app".into(),
             default_branch: "main".into(),
             remote_url: Some("git@github.com:acme/app.git".into()),
-        },
+        }),
+        mcp_servers: vec![],
+        board_tools: None,
         skill_paths: vec![],
         resume_session_id: None,
         extra_instructions: None,
     }
+}
+
+fn tk(s: &mut RunSpec) -> &mut TicketSpec {
+    s.ticket.as_mut().unwrap()
 }
 
 fn runner(speed: f64) -> DemoRunner {
@@ -168,11 +177,11 @@ async fn work_run_is_complete_and_believable() {
         .iter()
         .any(|u| matches!(u, RunUpdate::PrOpened { number: 102, .. })));
     let mut s = spec(RunKind::Work, PermissionMode::AcceptEdits);
-    s.ticket.branch = Some("boba/T-42-x".into());
-    s.ticket.pr_number = Some(7);
-    s.ticket.pr_url = Some("https://github.com/acme/app/pull/7".into());
-    s.ticket.review_feedback = Some("Add a test for the error path".into());
-    s.ticket.review_rounds = 1;
+    tk(&mut s).branch = Some("boba/T-42-x".into());
+    tk(&mut s).pr_number = Some(7);
+    tk(&mut s).pr_url = Some("https://github.com/acme/app/pull/7".into());
+    tk(&mut s).review_feedback = Some("Add a test for the error path".into());
+    tk(&mut s).review_rounds = 1;
     s.resume_session_id = Some("sess-1".into());
     let updates = run_to_end(&r, s).await;
     check_stream(&updates);
@@ -193,9 +202,9 @@ async fn review_verdicts_match_the_block_and_rates() {
     for (i, rounds) in [0u32, 2].into_iter().enumerate() {
         for _ in 0..n {
             let mut s = spec(RunKind::Review, PermissionMode::Plan);
-            s.ticket.pr_number = Some(9);
-            s.ticket.branch = Some("boba/T-42-x".into());
-            s.ticket.review_rounds = rounds;
+            tk(&mut s).pr_number = Some(9);
+            tk(&mut s).branch = Some("boba/T-42-x".into());
+            tk(&mut s).review_rounds = rounds;
             let updates = run_to_end(&r, s).await;
             check_stream(&updates);
             let out = finished(&updates).clone();
@@ -405,4 +414,127 @@ fn helpers() {
     assert_eq!(github_slug("https://gitlab.com/acme/app"), None);
     assert_eq!(approval_probability(0), 0.75);
     assert!(approval_probability(10) <= 0.97);
+}
+
+#[tokio::test]
+async fn job_runs_report_and_file_tickets() {
+    use boba_core::automation::JobOutput;
+    use boba_core::runner::{BoardToolsSpec, JobSpec};
+    let r = runner(0.0);
+    for output in [
+        JobOutput::Report,
+        JobOutput::Tickets,
+        JobOutput::PullRequest,
+    ] {
+        let mut s = spec(RunKind::Job, PermissionMode::AcceptEdits);
+        s.ticket = None;
+        if output != JobOutput::PullRequest {
+            s.repo = None;
+        }
+        s.job = Some(JobSpec {
+            id: Uuid::now_v7(),
+            name: "Weekly SEO audit".into(),
+            prompt: "Find pages losing clicks and file tickets".into(),
+            output,
+            previous_result: Some("Last week: 2 pages flagged".into()),
+        });
+        s.board_tools = Some(BoardToolsSpec {
+            url: "http://127.0.0.1:7777/api/mcp".into(),
+            token: "t".into(),
+        });
+        let updates = run_to_end(&r, s).await;
+        check_stream(&updates);
+        let out = finished(&updates);
+        assert_eq!(out.status, RunStatus::Succeeded, "{output:?}: {out:?}");
+        let tools: Vec<String> = updates
+            .iter()
+            .filter_map(|u| match u {
+                RunUpdate::Log { line } if line.kind == LogKind::ToolUse => Some(
+                    line.data.as_ref().unwrap()["name"]
+                        .as_str()
+                        .unwrap()
+                        .to_string(),
+                ),
+                _ => None,
+            })
+            .collect();
+        match output {
+            JobOutput::Report => {
+                assert!(tools.iter().any(|t| t.starts_with("mcp__search_console__")));
+                assert!(out.summary.as_deref().unwrap().contains("Weekly SEO audit"));
+            }
+            JobOutput::Tickets => assert!(tools.iter().any(|t| t == "mcp__boba__create_ticket")),
+            JobOutput::PullRequest => {
+                assert!(updates
+                    .iter()
+                    .any(|u| matches!(u, RunUpdate::PrOpened { .. })));
+            }
+        }
+    }
+    // A PR job without a repo fails cleanly.
+    let mut s = spec(RunKind::Job, PermissionMode::AcceptEdits);
+    s.ticket = None;
+    s.repo = None;
+    s.job = Some(JobSpec {
+        id: Uuid::now_v7(),
+        name: "Bump deps".into(),
+        prompt: "Bump".into(),
+        output: JobOutput::PullRequest,
+        previous_result: None,
+    });
+    let updates = run_to_end(&r, s).await;
+    assert_eq!(finished(&updates).status, RunStatus::Failed);
+}
+
+#[tokio::test]
+async fn command_runs_return_a_plan() {
+    use boba_core::runner::CommandSpec;
+    let r = runner(0.0);
+    let mut s = spec(RunKind::Command, PermissionMode::Plan);
+    s.ticket = None;
+    s.repo = None;
+    s.command = Some(CommandSpec {
+        text: "create an agent named Mochi to review PRs".into(),
+        voice: true,
+        user_name: "Florent".into(),
+        tab_id: None,
+        ticket_id: None,
+        agent_id: None,
+        board_digest: serde_json::json!({ "agents": [], "tabs": [] }),
+    });
+    let updates = run_to_end(&r, s).await;
+    check_stream(&updates);
+    let out = finished(&updates);
+    assert_eq!(out.status, RunStatus::Succeeded);
+    let plan = out.plan.as_ref().unwrap();
+    assert_eq!(plan["actions"][0]["action"]["action"], "create_agent");
+    assert_eq!(plan["actions"][0]["action"]["agent"]["name"], "Mochi");
+    let text = updates
+        .iter()
+        .rev()
+        .find_map(|u| match u {
+            RunUpdate::Log { line } if line.kind == LogKind::Text => Some(line.text.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(text.contains("```boba-plan"));
+}
+
+#[tokio::test]
+async fn imported_pr_review_uses_head_branch() {
+    use boba_core::automation::TicketSource;
+    let r = runner(0.0);
+    let mut s = spec(RunKind::Review, PermissionMode::Plan);
+    tk(&mut s).pr_number = Some(31);
+    tk(&mut s).source = TicketSource::GithubPr {
+        repo_id: Uuid::now_v7(),
+        number: 31,
+        url: "https://github.com/acme/app/pull/31".into(),
+        author: "outsider".into(),
+        head_branch: "outsider/fix-typo".into(),
+    };
+    let updates = run_to_end(&r, s).await;
+    assert!(
+        matches!(&updates[0], RunUpdate::Started { branch, .. } if branch == "outsider/fix-typo")
+    );
 }

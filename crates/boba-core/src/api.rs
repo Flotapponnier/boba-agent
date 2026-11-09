@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::automation::*;
 use crate::event::HistoryEvent;
 use crate::model::*;
 
@@ -20,6 +21,8 @@ pub struct Snapshot {
     pub repos: Vec<Repo>,
     pub users: Vec<User>,
     pub runners: Vec<RunnerInfo>,
+    pub jobs: Vec<Job>,
+    pub connectors: Vec<Connector>,
     /// Latest 100 history events, newest first.
     pub history: Vec<HistoryEvent>,
     pub settings: WorkspaceSettings,
@@ -50,6 +53,9 @@ pub struct WorkspaceSettings {
     pub music_enabled_by_default: bool,
     /// True when no Claude Code binary / API key is configured: runs are simulated.
     pub demo_mode: bool,
+    /// Speech-to-text for voice commands.
+    #[serde(default)]
+    pub speech: SpeechProvider,
 }
 
 impl Default for WorkspaceSettings {
@@ -59,6 +65,7 @@ impl Default for WorkspaceSettings {
             theme: "sky".into(),
             music_enabled_by_default: false,
             demo_mode: true,
+            speech: SpeechProvider::default(),
         }
     }
 }
@@ -126,6 +133,8 @@ pub struct UpdateUser {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CreateAgent {
+    pub connector_ids: Option<Vec<Id>>,
+    pub board_tools: Option<bool>,
     pub name: String,
     pub role: String,
     pub sprite: String,
@@ -143,6 +152,8 @@ pub struct CreateAgent {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct UpdateAgent {
+    pub connector_ids: Option<Vec<Id>>,
+    pub board_tools: Option<bool>,
     pub name: Option<String>,
     pub role: Option<String>,
     pub sprite: Option<String>,
@@ -267,6 +278,7 @@ pub struct UpdateTab {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CreateRepo {
+    pub sync: Option<RepoSync>,
     pub name: String,
     pub path: String,
     pub remote_url: Option<String>,
@@ -310,4 +322,200 @@ pub struct HistoryQuery {
 pub struct ApiError {
     pub error: String,
     pub code: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateRepo {
+    pub name: Option<String>,
+    pub path: Option<String>,
+    pub remote_url: Option<Option<String>>,
+    pub default_branch: Option<String>,
+    pub sync: Option<RepoSync>,
+}
+
+/// `POST /api/repos/:id/sync` result.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SyncReport {
+    pub imported_issues: u32,
+    pub imported_prs: u32,
+    pub updated: u32,
+    pub closed: u32,
+    pub errors: Vec<String>,
+}
+
+// ---------------------------------------------------------------- connectors
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateConnector {
+    pub name: String,
+    pub kind: ConnectorKind,
+    pub transport: McpTransport,
+    /// Write-only secret values by key.
+    pub secrets: std::collections::BTreeMap<String, String>,
+    pub allowed_tools: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateConnector {
+    pub name: Option<String>,
+    pub transport: Option<McpTransport>,
+    /// Keys present are set; a key mapped to "" is deleted; absent keys are kept.
+    pub secrets: Option<std::collections::BTreeMap<String, String>>,
+    pub allowed_tools: Option<Vec<String>>,
+}
+
+/// `POST /api/connectors/:id/test` – starts the MCP server and lists its tools.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConnectorTestResult {
+    pub ok: bool,
+    pub tools: Vec<String>,
+    pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------- jobs
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateJob {
+    pub name: String,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub agent_id: Id,
+    pub prompt: String,
+    pub schedule: Schedule,
+    pub output: JobOutput,
+    pub enabled: Option<bool>,
+    pub repo_id: Option<Id>,
+    pub tab_id: Option<Id>,
+    pub skip_if_running: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateJob {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub agent_id: Option<Id>,
+    pub prompt: Option<String>,
+    pub schedule: Option<Schedule>,
+    pub output: Option<JobOutput>,
+    pub enabled: Option<bool>,
+    pub repo_id: Option<Option<Id>>,
+    pub tab_id: Option<Option<Id>>,
+    pub skip_if_running: Option<bool>,
+}
+
+/// `POST /api/jobs/preview-schedule` – validate a schedule and show the next fire times.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SchedulePreview {
+    pub valid: bool,
+    pub error: Option<String>,
+    pub next: Vec<chrono::DateTime<chrono::Utc>>,
+    /// Human sentence, e.g. "Every Monday at 09:00 (Europe/Paris)".
+    pub description: String,
+}
+
+// ---------------------------------------------------------------- command bar & voice
+
+/// Where voice is transcribed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum SpeechProvider {
+    /// Browser Web Speech API (audio handled by the browser vendor). Text only reaches the server.
+    #[default]
+    Browser,
+    /// Self-hosted Whisper-compatible endpoint (e.g. whisper.cpp server); the UI uploads audio to
+    /// `POST /api/speech/transcribe`, which proxies to `url`. Audio never leaves your infra.
+    Whisper {
+        url: String,
+    },
+    Disabled,
+}
+
+/// `POST /api/speech/transcribe` response (body: audio/webm or audio/wav).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Transcript {
+    pub text: String,
+}
+
+/// `POST /api/command` [View]: "create a job that…", "make Boba Dev review this"…
+/// Starts a `RunKind::Command` run of the concierge; its result arrives as
+/// `ServerMessage::CommandPlan` to the requesting user only.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CommandRequest {
+    pub text: String,
+    /// UI context so "this" / "here" resolve: current tab, selected ticket, selected agent.
+    pub tab_id: Option<Id>,
+    pub ticket_id: Option<Id>,
+    pub agent_id: Option<Id>,
+    /// True when the text came from voice (the concierge tolerates transcription errors).
+    pub voice: bool,
+}
+
+/// One proposed action. Executed only after the user confirms, with the user's own permissions.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "action", rename_all = "snake_case")]
+#[ts(export)]
+pub enum CommandAction {
+    CreateTicket { ticket: CreateTicket },
+    UpdateTicket { ticket_id: Id, patch: UpdateTicket },
+    MoveTicket { ticket_id: Id, column_id: Id },
+    AssignAgent { ticket_id: Id, assign: AssignAgent },
+    CreateAgent { agent: CreateAgent },
+    UpdateAgent { agent_id: Id, patch: UpdateAgent },
+    CreateJob { job: CreateJob },
+    UpdateJob { job_id: Id, patch: UpdateJob },
+    RunJob { job_id: Id },
+    CreateTab { tab: CreateTab },
+    SyncRepo { repo_id: Id },
+    CancelRun { run_id: Id },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlannedAction {
+    /// Human sentence for the confirmation card: "Create job 'Weekly SEO audit' (Mondays 09:00) for Pinky SEO".
+    pub label: String,
+    pub action: CommandAction,
+    /// Permission the user needs; actions the user lacks are returned but flagged.
+    pub required: Permission,
+    pub allowed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CommandPlan {
+    pub run_id: Id,
+    /// Short spoken/written answer ("Sure, here's what I'll do").
+    pub reply: String,
+    pub actions: Vec<PlannedAction>,
+    /// Set when the concierge needs more info instead of acting.
+    pub question: Option<String>,
+}
+
+/// `POST /api/command/execute` [per action]: run the confirmed (possibly edited) actions in order.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExecuteCommand {
+    pub run_id: Id,
+    pub actions: Vec<CommandAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ActionResult {
+    pub ok: bool,
+    pub error: Option<String>,
+    /// Created/updated entity, for the UI to focus it.
+    pub entity: Option<crate::event::Entity>,
 }

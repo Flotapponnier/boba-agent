@@ -17,8 +17,21 @@ pub struct RunSpec {
     pub run_id: Id,
     pub kind: RunKind,
     pub agent: AgentSpec,
-    pub ticket: TicketSpec,
-    pub repo: RepoSpec,
+    /// None for job runs.
+    pub ticket: Option<TicketSpec>,
+    /// Set for job runs.
+    pub job: Option<JobSpec>,
+    /// Set for command runs: the user's sentence + a JSON digest of the board (tabs, columns,
+    /// agents, jobs, repos, connectors, skill ids/names) so the concierge can resolve names to ids.
+    /// The concierge is read-only and must end with a ```boba-plan``` JSON block (a `CommandPlan`
+    /// without run_id/required/allowed; the server fills those).
+    pub command: Option<CommandSpec>,
+    /// None = job without repo: the runner uses a scratch dir under its data dir.
+    pub repo: Option<RepoSpec>,
+    /// MCP servers from the agent's connectors, secrets resolved (runner side only, never logged).
+    pub mcp_servers: Vec<McpServerSpec>,
+    /// Board tools MCP endpoint, when the agent has `board_tools`.
+    pub board_tools: Option<BoardToolsSpec>,
     /// Absolute paths of the skill folders to expose to Claude Code.
     pub skill_paths: Vec<String>,
     /// Resume this Claude Code session (follow-up / changes-requested round).
@@ -54,6 +67,52 @@ pub struct TicketSpec {
     pub review_feedback: Option<String>,
     /// Number of review rounds already done on this ticket (0 on the first work run).
     pub review_rounds: u32,
+    /// Origin; for imported PRs the runner reviews `head_branch` instead of a boba branch.
+    pub source: crate::automation::TicketSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandSpec {
+    pub text: String,
+    pub voice: bool,
+    pub user_name: String,
+    /// UI context so "this" / "here" resolve.
+    pub tab_id: Option<Id>,
+    pub ticket_id: Option<Id>,
+    pub agent_id: Option<Id>,
+    /// Shape pinned in docs/ARCHITECTURE.md ("Board digest").
+    pub board_digest: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobSpec {
+    pub id: Id,
+    pub name: String,
+    pub prompt: String,
+    pub output: crate::automation::JobOutput,
+    /// Report from the previous run, so recurring jobs can avoid repeating themselves.
+    pub previous_result: Option<String>,
+}
+
+/// One MCP server to pass to Claude Code (`--mcp-config`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerSpec {
+    /// Server name as seen by Claude Code (tools become `mcp__<name>__<tool>`).
+    pub name: String,
+    pub transport: crate::automation::McpTransport,
+    /// Secret values by key. Stdio: exported as env vars. Http: used for `header_secrets`.
+    pub secrets: std::collections::BTreeMap<String, String>,
+    /// Empty = all tools allowed.
+    pub allowed_tools: Vec<String>,
+}
+
+/// The server's own MCP endpoint exposing board tools to the agent (see docs/ARCHITECTURE.md).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoardToolsSpec {
+    /// Streamable HTTP MCP URL, e.g. http://127.0.0.1:7777/api/mcp
+    pub url: String,
+    /// Per-run bearer token; scoped to this run, revoked when it ends.
+    pub token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +171,9 @@ pub struct RunOutcome {
     /// Review runs: feedback to send back to the author when changes are requested.
     pub feedback: Option<String>,
     pub error: Option<String>,
+    /// Command runs: the parsed ```boba-plan``` block.
+    #[ts(type = "unknown")]
+    pub plan: Option<serde_json::Value>,
 }
 
 /// Remote runner protocol over WebSocket `/api/runners/ws` (bearer runner token).
