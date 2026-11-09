@@ -1,0 +1,94 @@
+name: Release
+# Tags v* build boba-agent for macOS (arm64, x86_64) and Linux (x86_64, arm64; static musl),
+# with the web UI embedded, and publish them to a GitHub Release with SHA256SUMS.
+# Pull requests touching the release tooling run the same builds without publishing.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/package.sh
+      - install.sh
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: web/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm build
+        working-directory: web
+      - uses: actions/upload-artifact@v4
+        with: { name: web-dist, path: web/dist, if-no-files-found: error }
+
+  build:
+    needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: x86_64-apple-darwin, os: macos-14 }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, zig: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, zig: true }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: web/dist }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
+      - uses: Swatinem/rust-cache@v2
+        with: { key: "${{ matrix.target }}" }
+      - if: matrix.zig
+        uses: mlugg/setup-zig@v2
+        with: { version: 0.14.1 }
+      - if: matrix.zig
+        run: pip install --break-system-packages cargo-zigbuild==0.20.1 || cargo install --locked cargo-zigbuild --version 0.20.1
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.zig }}" = "true" ]; then
+            cargo zigbuild --release --locked -p boba-server --target ${{ matrix.target }}
+          else
+            cargo build --release --locked -p boba-server --target ${{ matrix.target }}
+          fi
+      - name: Smoke test
+        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-apple-darwin'
+        run: ./target/${{ matrix.target }}/release/boba-agent runner --help | head -3
+      - run: scripts/package.sh ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boba-agent-${{ matrix.target }}
+          path: dist/boba-agent-${{ matrix.target }}.tar.gz*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: dist, pattern: boba-agent-*, merge-multiple: true }
+      - name: Checksums
+        run: cd dist && cat *.sha256 | sort -k2 > SHA256SUMS && cat SHA256SUMS
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS install.sh \
+            --title "Boba Agent $TAG" --generate-notes --verify-tag $prerelease
