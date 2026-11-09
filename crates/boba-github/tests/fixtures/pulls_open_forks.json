@@ -1,0 +1,258 @@
+[
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/pulls/8773",
+  "html_url": "https://github.com/tokio-rs/tokio/pull/8773",
+  "id": 5226374239,
+  "number": 8773,
+  "state": "open",
+  "locked": false,
+  "title": "sync: don't hold a mutex permit while yielding for coop budget",
+  "user": {
+   "login": "Jeremiah-D",
+   "id": 235112616,
+   "type": "User",
+   "html_url": "https://github.com/Jeremiah-D"
+  },
+  "body": "Fixes #8772.\n\nA task driving a FuturesUnordered of futures that lock the same mutex, while locking it itself between polls, deadlocks on 1.54.x once the coop budget runs out: lock() takes the permit and then yields for budget, and the permit ends up stranded on a future that never gets polled again.\n\nTwo changes in batch_semaphore.rs, both restoring the \"a Pending lock() holds no permit\" invariant",
+  "created_at": "2026-11-09T15:26:26Z",
+  "updated_at": "2026-11-09T18:12:55Z",
+  "closed_at": null,
+  "merged_at": null,
+  "draft": false,
+  "head": {
+   "label": "Jeremiah-D:fix/mutex-coop-deadlock-8772",
+   "ref": "fix/mutex-coop-deadlock-8772",
+   "sha": "2048e7c59d729ae93f117aea1a905b1d99539ff5",
+   "user": {
+    "login": "Jeremiah-D",
+    "id": 235112616,
+    "type": "User",
+    "html_url": "https://github.com/Jeremiah-D"
+   },
+   "repo": {
+    "id": 1429426745,
+    "name": "tokio",
+    "full_name": "Jeremiah-D/tokio",
+    "fork": true,
+    "html_url": "https://github.com/Jeremiah-D/tokio",
+    "private": false
+   }
+  },
+  "base": {
+   "label": "tokio-rs:master",
+   "ref": "master",
+   "sha": "c1489e0ef85f00f3590585eab1f1712129834742",
+   "user": {
+    "login": "tokio-rs",
+    "id": 20248544,
+    "type": "Organization",
+    "html_url": "https://github.com/tokio-rs"
+   },
+   "repo": {
+    "id": 67836789,
+    "name": "tokio",
+    "full_name": "tokio-rs/tokio",
+    "fork": false,
+    "html_url": "https://github.com/tokio-rs/tokio",
+    "private": false
+   }
+  },
+  "author_association": "CONTRIBUTOR",
+  "labels": [
+   {
+    "id": 439897188,
+    "name": "C-bug",
+    "color": "f5f1fd"
+   },
+   {
+    "id": 1993501286,
+    "name": "A-tokio",
+    "color": "f7e101"
+   },
+   {
+    "id": 1993511927,
+    "name": "M-sync",
+    "color": "f7b101"
+   },
+   {
+    "id": 1993533274,
+    "name": "S-waiting-on-review",
+    "color": "d3dddd"
+   },
+   {
+    "id": 5679954797,
+    "name": "R-loom-sync",
+    "color": "D9C0F1"
+   }
+  ]
+ },
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/pulls/8771",
+  "html_url": "https://github.com/tokio-rs/tokio/pull/8771",
+  "id": 5223728722,
+  "number": 8771,
+  "state": "open",
+  "locked": false,
+  "title": "tokio-test: make `assert_ready_eq!` usable as an expression",
+  "user": {
+   "login": "vignesh2027",
+   "id": 207180873,
+   "type": "User",
+   "html_url": "https://github.com/vignesh2027"
+  },
+  "body": "## Motivation\n\n`assert_ready_eq!` expands to a `let` statement followed by `assert_eq!`, without an enclosing block. Because of that it only compiles in statement position. Using it as a match arm or as a closure body fails with \"expected expression, found `let` statement\", while `assert_ready!`, `assert_ready_ok!` and `assert_ready_err!` all work there.\n\n```rust\nmatch poll {\n    Poll::Ready(()) =",
+  "created_at": "2026-11-09T12:18:09Z",
+  "updated_at": "2026-11-09T16:40:59Z",
+  "closed_at": null,
+  "merged_at": null,
+  "draft": false,
+  "head": {
+   "label": "vignesh2027:tokio-test-assert-ready-eq-expr",
+   "ref": "tokio-test-assert-ready-eq-expr",
+   "sha": "93df7c6cd7c932d82cb4620c70516fb3c8a15d84",
+   "user": {
+    "login": "vignesh2027",
+    "id": 207180873,
+    "type": "User",
+    "html_url": "https://github.com/vignesh2027"
+   },
+   "repo": {
+    "id": 1439938205,
+    "name": "tokio",
+    "full_name": "vignesh2027/tokio",
+    "fork": true,
+    "html_url": "https://github.com/vignesh2027/tokio",
+    "private": false
+   }
+  },
+  "base": {
+   "label": "tokio-rs:master",
+   "ref": "master",
+   "sha": "e633c8f84fa01b92dcefb0e6d161dffab41e2361",
+   "user": {
+    "login": "tokio-rs",
+    "id": 20248544,
+    "type": "Organization",
+    "html_url": "https://github.com/tokio-rs"
+   },
+   "repo": {
+    "id": 67836789,
+    "name": "tokio",
+    "full_name": "tokio-rs/tokio",
+    "fork": false,
+    "html_url": "https://github.com/tokio-rs/tokio",
+    "private": false
+   }
+  },
+  "author_association": "CONTRIBUTOR",
+  "labels": [
+   {
+    "id": 439897188,
+    "name": "C-bug",
+    "color": "f5f1fd"
+   },
+   {
+    "id": 1436305752,
+    "name": "A-tokio-test",
+    "color": "f7e101"
+   },
+   {
+    "id": 1993533274,
+    "name": "S-waiting-on-review",
+    "color": "d3dddd"
+   },
+   {
+    "id": 2216880757,
+    "name": "M-macros",
+    "color": "f7b101"
+   }
+  ]
+ },
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/pulls/8683",
+  "html_url": "https://github.com/tokio-rs/tokio/pull/8683",
+  "id": 4951625720,
+  "number": 8683,
+  "state": "open",
+  "locked": false,
+  "title": "Share runtime helpers across io-uring tests",
+  "user": {
+   "login": "darkraider01",
+   "id": 95766741,
+   "type": "User",
+   "html_url": "https://github.com/darkraider01"
+  },
+  "body": "A few io-uring test suites had identical runtime builders and runtime combinations. This moves them into `tests/support/io_uring.rs` so they can share the setup. \r\n\r\nI\u2019ll keep this in draft until #8655 merges, then rebase and update `fs_uring_link.rs` to use the shared helpers too.",
+  "created_at": "2026-10-21T12:35:14Z",
+  "updated_at": "2026-10-21T15:03:28Z",
+  "closed_at": null,
+  "merged_at": null,
+  "draft": true,
+  "head": {
+   "label": "darkraider01:test-io-uring-runtime-cleanup",
+   "ref": "test-io-uring-runtime-cleanup",
+   "sha": "777e202787a39f070831ffd2ac0b9a573bf7f7ea",
+   "user": {
+    "login": "darkraider01",
+    "id": 95766741,
+    "type": "User",
+    "html_url": "https://github.com/darkraider01"
+   },
+   "repo": {
+    "id": 1331311526,
+    "name": "tokio",
+    "full_name": "darkraider01/tokio",
+    "fork": true,
+    "html_url": "https://github.com/darkraider01/tokio",
+    "private": false
+   }
+  },
+  "base": {
+   "label": "tokio-rs:master",
+   "ref": "master",
+   "sha": "cffdc7601134598cebc45d03af0358dedfcb3ff1",
+   "user": {
+    "login": "tokio-rs",
+    "id": 20248544,
+    "type": "Organization",
+    "html_url": "https://github.com/tokio-rs"
+   },
+   "repo": {
+    "id": 67836789,
+    "name": "tokio",
+    "full_name": "tokio-rs/tokio",
+    "fork": false,
+    "html_url": "https://github.com/tokio-rs/tokio",
+    "private": false
+   }
+  },
+  "author_association": "CONTRIBUTOR",
+  "labels": [
+   {
+    "id": 1119430889,
+    "name": "C-maintenance",
+    "color": "f5f1fd"
+   },
+   {
+    "id": 1993501286,
+    "name": "A-tokio",
+    "color": "f7e101"
+   },
+   {
+    "id": 1993507783,
+    "name": "M-fs",
+    "color": "f7b101"
+   },
+   {
+    "id": 1993532838,
+    "name": "S-waiting-on-author",
+    "color": "d3dddd"
+   },
+   {
+    "id": 9904045650,
+    "name": "T-io-uring",
+    "color": "bfd4f2"
+   }
+  ]
+ }
+]

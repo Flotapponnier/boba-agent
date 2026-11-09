@@ -1,0 +1,372 @@
+[
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/issues/8773",
+  "html_url": "https://github.com/tokio-rs/tokio/pull/8773",
+  "id": 6289038554,
+  "number": 8773,
+  "title": "sync: don't hold a mutex permit while yielding for coop budget",
+  "user": {
+   "login": "Jeremiah-D",
+   "id": 235112616,
+   "type": "User",
+   "html_url": "https://github.com/Jeremiah-D"
+  },
+  "labels": [
+   {
+    "id": 439897188,
+    "name": "C-bug",
+    "color": "f5f1fd",
+    "description": "Category: This is a bug."
+   },
+   {
+    "id": 1993501286,
+    "name": "A-tokio",
+    "color": "f7e101",
+    "description": "Area: The main tokio crate"
+   },
+   {
+    "id": 1993511927,
+    "name": "M-sync",
+    "color": "f7b101",
+    "description": "Module: tokio/sync"
+   },
+   {
+    "id": 1993533274,
+    "name": "S-waiting-on-review",
+    "color": "d3dddd",
+    "description": "Status: Awaiting review from the assignee but also interested parties."
+   },
+   {
+    "id": 5679954797,
+    "name": "R-loom-sync",
+    "color": "D9C0F1",
+    "description": "Run loom sync tests on this PR"
+   }
+  ],
+  "state": "open",
+  "locked": false,
+  "comments": 0,
+  "created_at": "2026-11-09T15:26:26Z",
+  "updated_at": "2026-11-09T18:12:55Z",
+  "closed_at": null,
+  "author_association": "CONTRIBUTOR",
+  "body": "Fixes #8772.\n\nA task driving a FuturesUnordered of futures that lock the same mutex, while locking it itself between polls, deadlocks on 1.54.x once the coop budget runs out: lock() takes the permit and then yields for budget, and the permit ends up stranded on a future that never gets polled again.\n\nTwo changes in batch_semaphore.rs, both restoring the \"a Pending lock() holds no permit\" invariant:\n- an unqueued waiter that could be satisfied right now but has no budget left yields without taking the permit or joining the queue;\n- a queued waiter that is assigned permits and then yields for bu",
+  "pull_request": {
+   "url": "https://api.github.com/repos/tokio-rs/tokio/pulls/8773",
+   "html_url": "https://github.com/tokio-rs/tokio/pull/8773",
+   "diff_url": "https://github.com/tokio-rs/tokio/pull/8773.diff",
+   "patch_url": "https://github.com/tokio-rs/tokio/pull/8773.patch",
+   "merged_at": null
+  },
+  "draft": false
+ },
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/issues/8772",
+  "html_url": "https://github.com/tokio-rs/tokio/issues/8772",
+  "id": 6287210973,
+  "number": 8772,
+  "title": "sync: Mutex deadlock regression in 1.54.0 since #8371 (lock() holds the permit while yielding for coop budget)",
+  "user": {
+   "login": "dgehriger",
+   "id": 105200493,
+   "type": "User",
+   "html_url": "https://github.com/dgehriger"
+  },
+  "labels": [
+   {
+    "id": 439897188,
+    "name": "C-bug",
+    "color": "f5f1fd",
+    "description": "Category: This is a bug."
+   },
+   {
+    "id": 1993501286,
+    "name": "A-tokio",
+    "color": "f7e101",
+    "description": "Area: The main tokio crate"
+   },
+   {
+    "id": 1993511927,
+    "name": "M-sync",
+    "color": "f7b101",
+    "description": "Module: tokio/sync"
+   },
+   {
+    "id": 1993523557,
+    "name": "I-hang",
+    "color": "e10c02",
+    "description": "Program never terminates, resulting from infinite loops, deadlock, livelock, etc."
+   },
+   {
+    "id": 2025338308,
+    "name": "M-coop",
+    "color": "f7b101",
+    "description": "Module: tokio/coop"
+   }
+  ],
+  "state": "open",
+  "locked": false,
+  "comments": 0,
+  "created_at": "2026-11-09T13:42:14Z",
+  "updated_at": "2026-11-09T16:25:50Z",
+  "closed_at": null,
+  "author_association": "NONE",
+  "body": "**Version**\r\n\r\n- Hangs: tokio 1.54.0 and 1.54.1\r\n- Works: tokio 1.53.3 (and any master commit before d241e4b5)\r\n- futures 0.3.34, rustc 1.95.0\r\n\r\n**Platform**\r\n\r\nWindows 11 x86_64 (10.0.26300), 24 logical CPUs. The original application also hangs on other 24-core Windows machines. Reproduced with both the `multi_thread` (default and explicit worker counts from 1 to 24) and the `current_thread` runtime, so it does not look platform- or core-count-specific, but I have only run it on Windows.\r\n\r\n**Description**\r\n\r\nSince 1.54.0, a task that drives a `FuturesUnordered` whose futures lock a `tokio::"
+ },
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/issues/8771",
+  "html_url": "https://github.com/tokio-rs/tokio/pull/8771",
+  "id": 6285900782,
+  "number": 8771,
+  "title": "tokio-test: make `assert_ready_eq!` usable as an expression",
+  "user": {
+   "login": "vignesh2027",
+   "id": 207180873,
+   "type": "User",
+   "html_url": "https://github.com/vignesh2027"
+  },
+  "labels": [
+   {
+    "id": 439897188,
+    "name": "C-bug",
+    "color": "f5f1fd",
+    "description": "Category: This is a bug."
+   },
+   {
+    "id": 1436305752,
+    "name": "A-tokio-test",
+    "color": "f7e101",
+    "description": "Area: The tokio-test crate"
+   },
+   {
+    "id": 1993533274,
+    "name": "S-waiting-on-review",
+    "color": "d3dddd",
+    "description": "Status: Awaiting review from the assignee but also interested parties."
+   },
+   {
+    "id": 2216880757,
+    "name": "M-macros",
+    "color": "f7b101",
+    "description": "Module: macros in the main Tokio crate"
+   }
+  ],
+  "state": "open",
+  "locked": false,
+  "comments": 0,
+  "created_at": "2026-11-09T12:18:09Z",
+  "updated_at": "2026-11-09T16:40:59Z",
+  "closed_at": null,
+  "author_association": "CONTRIBUTOR",
+  "body": "## Motivation\n\n`assert_ready_eq!` expands to a `let` statement followed by `assert_eq!`, without an enclosing block. Because of that it only compiles in statement position. Using it as a match arm or as a closure body fails with \"expected expression, found `let` statement\", while `assert_ready!`, `assert_ready_ok!` and `assert_ready_err!` all work there.\n\n```rust\nmatch poll {\n    Poll::Ready(()) => assert_ready_eq!(poll, ()),\n    Poll::Pending => unreachable!(),\n}\n```\n\n## Solution\n\nWrap both arms of the macro in a block, the same way the other assertion macros in `tokio-test` already do. Exist",
+  "pull_request": {
+   "url": "https://api.github.com/repos/tokio-rs/tokio/pulls/8771",
+   "html_url": "https://github.com/tokio-rs/tokio/pull/8771",
+   "diff_url": "https://github.com/tokio-rs/tokio/pull/8771.diff",
+   "patch_url": "https://github.com/tokio-rs/tokio/pull/8771.patch",
+   "merged_at": null
+  },
+  "draft": false
+ },
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/issues/8769",
+  "html_url": "https://github.com/tokio-rs/tokio/pull/8769",
+  "id": 6276644330,
+  "number": 8769,
+  "title": "stream: don't panic in `chunks_timeout` with a huge `max_size`",
+  "user": {
+   "login": "yxshee",
+   "id": 84263676,
+   "type": "User",
+   "html_url": "https://github.com/yxshee"
+  },
+  "labels": [
+   {
+    "id": 439897188,
+    "name": "C-bug",
+    "color": "f5f1fd",
+    "description": "Category: This is a bug."
+   },
+   {
+    "id": 1993513841,
+    "name": "M-time",
+    "color": "f7b101",
+    "description": "Module: tokio/time"
+   },
+   {
+    "id": 1993532838,
+    "name": "S-waiting-on-author",
+    "color": "d3dddd",
+    "description": "Status: awaiting some action (such as code changes) from the PR or issue author."
+   },
+   {
+    "id": 1993675323,
+    "name": "M-stream",
+    "color": "F7B101",
+    "description": "Module: tokio/stream"
+   },
+   {
+    "id": 2583818939,
+    "name": "A-tokio-stream",
+    "color": "f7e101",
+    "description": "Area: The tokio-stream crate"
+   }
+  ],
+  "state": "open",
+  "locked": false,
+  "comments": 0,
+  "created_at": "2026-11-08T22:55:19Z",
+  "updated_at": "2026-11-09T12:08:30Z",
+  "closed_at": null,
+  "author_association": "NONE",
+  "body": "`chunks_timeout` reserves `max_size` slots each time a batch starts. If `max_size` is very large, for example `usize::MAX` to batch by time only, the first item panics, though the docs say the method only panics when `max_size` is zero. #8680 moved this reservation out of the constructor, so an empty stream works now, but any stream that yields an item still panics:\n\n```rust\nlet chunked = stream::iter([1u8, 2, 3]).chunks_timeout(usize::MAX, Duration::from_secs(1));\ntokio::pin!(chunked);\nchunked.next().await; // panics: \"capacity overflow\"\n```\n\nExpected `Some(vec![1, 2, 3])`.\n\nThe fix uses `try",
+  "pull_request": {
+   "url": "https://api.github.com/repos/tokio-rs/tokio/pulls/8769",
+   "html_url": "https://github.com/tokio-rs/tokio/pull/8769",
+   "diff_url": "https://github.com/tokio-rs/tokio/pull/8769.diff",
+   "patch_url": "https://github.com/tokio-rs/tokio/pull/8769.patch",
+   "merged_at": null
+  },
+  "draft": false
+ },
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/issues/8768",
+  "html_url": "https://github.com/tokio-rs/tokio/pull/8768",
+  "id": 6270344269,
+  "number": 8768,
+  "title": "fs: wait for in-flight operations in File::set_permissions",
+  "user": {
+   "login": "Darksonn",
+   "id": 928074,
+   "type": "User",
+   "html_url": "https://github.com/Darksonn"
+  },
+  "labels": [
+   {
+    "id": 439897188,
+    "name": "C-bug",
+    "color": "f5f1fd",
+    "description": "Category: This is a bug."
+   },
+   {
+    "id": 1993501286,
+    "name": "A-tokio",
+    "color": "f7e101",
+    "description": "Area: The main tokio crate"
+   },
+   {
+    "id": 1993507783,
+    "name": "M-fs",
+    "color": "f7b101",
+    "description": "Module: tokio/fs"
+   },
+   {
+    "id": 1993533274,
+    "name": "S-waiting-on-review",
+    "color": "d3dddd",
+    "description": "Status: Awaiting review from the assignee but also interested parties."
+   }
+  ],
+  "state": "open",
+  "locked": false,
+  "comments": 0,
+  "created_at": "2026-11-08T11:15:43Z",
+  "updated_at": "2026-11-08T11:16:11Z",
+  "closed_at": null,
+  "author_association": "MEMBER",
+  "body": "`File::set_permissions` currently spawns a blocking permission update without waiting for in-flight operations on the file to complete. Thus, wait for in-flight operations before changing permissions, matching the other `File` methods.\n\nHaving an in-flight write complete after `set_permissions` can affect the file's permissions because on Unix, `write(2)` clears the setuid (`S_ISUID`) and setgid (`S_ISGID`) bits on a file, which would undo those permission bits if `set_permissions` just set them.",
+  "pull_request": {
+   "url": "https://api.github.com/repos/tokio-rs/tokio/pulls/8768",
+   "html_url": "https://github.com/tokio-rs/tokio/pull/8768",
+   "diff_url": "https://github.com/tokio-rs/tokio/pull/8768.diff",
+   "patch_url": "https://github.com/tokio-rs/tokio/pull/8768.patch",
+   "merged_at": null
+  },
+  "draft": false
+ },
+ {
+  "url": "https://api.github.com/repos/tokio-rs/tokio/issues/8767",
+  "html_url": "https://github.com/tokio-rs/tokio/pull/8767",
+  "id": 6261093280,
+  "number": 8767,
+  "title": "rt: coalesce driver unparks in current_thread runtime",
+  "user": {
+   "login": "Darksonn",
+   "id": 928074,
+   "type": "User",
+   "html_url": "https://github.com/Darksonn"
+  },
+  "labels": [
+   {
+    "id": 439897190,
+    "name": "C-enhancement",
+    "color": "f5f1fd",
+    "description": "Category: A PR with an enhancement or bugfix."
+   },
+   {
+    "id": 1993501286,
+    "name": "A-tokio",
+    "color": "f7e101",
+    "description": "Area: The main tokio crate"
+   },
+   {
+    "id": 1993510878,
+    "name": "M-runtime",
+    "color": "f7b101",
+    "description": "Module: tokio/runtime"
+   },
+   {
+    "id": 1993513841,
+    "name": "M-time",
+    "color": "f7b101",
+    "description": "Module: tokio/time"
+   },
+   {
+    "id": 1993533274,
+    "name": "S-waiting-on-review",
+    "color": "d3dddd",
+    "description": "Status: Awaiting review from the assignee but also interested parties."
+   },
+   {
+    "id": 5679956148,
+    "name": "R-loom-time-driver",
+    "color": "D9C0F1",
+    "description": "Run loom time driver tests on this PR"
+   },
+   {
+    "id": 5679957213,
+    "name": "R-loom-current-thread",
+    "color": "D9C0F1",
+    "description": "Run loom current-thread tests on this PR"
+   },
+   {
+    "id": 5679958406,
+    "name": "R-loom-multi-thread",
+    "color": "D9C0F1",
+    "description": "Run loom multi-thread tests on this PR"
+   },
+   {
+    "id": 10269683903,
+    "name": "R-loom-blocking",
+    "color": "D9C0F1",
+    "description": "Run loom `runtime::spawn_blocking` tests on this PR"
+   }
+  ],
+  "state": "open",
+  "locked": false,
+  "comments": 0,
+  "created_at": "2026-11-07T15:52:22Z",
+  "updated_at": "2026-11-07T15:59:14Z",
+  "closed_at": null,
+  "author_association": "MEMBER",
+  "body": "The current_thread scheduler and time driver currently unpark the I/O driver unconditionally on every remote wakeup and timer registration, even when the runtime thread is not parked. This causes redundant wake syscalls and leaves stale wakeup tokens in the driver that trigger spurious non-blocking park turns. Thus, track whether the current_thread scheduler is parked and only unpark the driver when transitioning out of the parked state.\n\nFixes: #5207\nCloses: #8383",
+  "pull_request": {
+   "url": "https://api.github.com/repos/tokio-rs/tokio/pulls/8767",
+   "html_url": "https://github.com/tokio-rs/tokio/pull/8767",
+   "diff_url": "https://github.com/tokio-rs/tokio/pull/8767.diff",
+   "patch_url": "https://github.com/tokio-rs/tokio/pull/8767.patch",
+   "merged_at": null
+  },
+  "draft": false
+ }
+]
