@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/boba-core", "crates/boba-runner", "crates/boba-server"]
+members = ["crates/boba-core", "crates/boba-runner", "crates/boba-server", "crates/boba-github"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 boba-core = { path = "crates/boba-core" }
 boba-runner = { path = "crates/boba-runner" }
+boba-github = { path = "crates/boba-github" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

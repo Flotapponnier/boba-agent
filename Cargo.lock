@@ -300,6 +300,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "boba-github"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "hmac",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "boba-runner"
 version = "0.1.0"
 dependencies = [

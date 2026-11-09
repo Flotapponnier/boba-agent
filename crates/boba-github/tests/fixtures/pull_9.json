@@ -1,0 +1,61 @@
+{
+ "url": "https://api.github.com/repos/Flotapponnier/boba-agent/pulls/9",
+ "html_url": "https://github.com/Flotapponnier/boba-agent/pull/9",
+ "id": 5229834234,
+ "number": 9,
+ "state": "open",
+ "locked": false,
+ "title": "runner: ClaudeCodeRunner for work, review, job and command runs",
+ "user": {
+  "login": "Flotapponnier",
+  "id": 160007691,
+  "type": "User",
+  "html_url": "https://github.com/Flotapponnier"
+ },
+ "body": "## What\n`ClaudeCodeRunner` (`crates/boba-runner/src/claude/`) runs the real `claude` CLI for all four `RunKind`s, implementing the `Runner` trait unchanged.\n\n| Kind | Where | Ends with |\n|---|---|---|\n| Work | worktree `<data>/worktrees/T-<n>` on `boba/T-<n>-<slug>` (reused on change rounds, `--resume`) | commit leftovers \u2192 push \u2192 open/reuse PR \u2192 `PrOpened` |\n| Review | detached worktree at `pull/<n>/head`, or `source.head_branch` for imported PRs | ```` ```boba-verdict ```` \u2192 `verdict` / `feedback` |\n| Job | PR jobs: worktree on `boba/job-<slug>-<date>`; others: detached worktree, or persiste",
+ "created_at": "2026-11-09T19:27:06Z",
+ "updated_at": "2026-11-09T19:27:07Z",
+ "closed_at": null,
+ "merged_at": null,
+ "draft": false,
+ "head": {
+  "label": "Flotapponnier:runner/claude",
+  "ref": "runner/claude",
+  "sha": "96683fcdd3f990a294a3b7cc816329ab2acdabf2",
+  "user": {
+   "login": "Flotapponnier",
+   "id": 160007691,
+   "type": "User",
+   "html_url": "https://github.com/Flotapponnier"
+  },
+  "repo": {
+   "id": 1451743215,
+   "name": "boba-agent",
+   "full_name": "Flotapponnier/boba-agent",
+   "fork": false,
+   "html_url": "https://github.com/Flotapponnier/boba-agent",
+   "private": false
+  }
+ },
+ "base": {
+  "label": "Flotapponnier:main",
+  "ref": "main",
+  "sha": "920e2d0a75ff1732f80d0bc0ea1cd74525aff2a0",
+  "user": {
+   "login": "Flotapponnier",
+   "id": 160007691,
+   "type": "User",
+   "html_url": "https://github.com/Flotapponnier"
+  },
+  "repo": {
+   "id": 1451743215,
+   "name": "boba-agent",
+   "full_name": "Flotapponnier/boba-agent",
+   "fork": false,
+   "html_url": "https://github.com/Flotapponnier/boba-agent",
+   "private": false
+  }
+ },
+ "author_association": "OWNER",
+ "labels": []
+}
