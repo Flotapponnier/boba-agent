@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use boba_core::api::*;
 use boba_core::automation::TicketSource;
-use boba_core::event::{Entity, EntityKind, HistoryEvent, HistoryKind};
+use boba_core::event::{Entity, EntityKind, HistoryKind};
 use boba_core::*;
 use chrono::Utc;
 use serde::Deserialize;
@@ -461,36 +461,11 @@ pub async fn assign(
             instructions,
             resume_session_id: None,
             trigger: Trigger::User(me.id),
+            reply_to: None,
         },
     )
     .await?;
     Ok(Json(run))
-}
-
-pub async fn comment(
-    State(state): State<SharedState>,
-    me: Auth,
-    Path(id): Path<Id>,
-    Json(req): Json<CommentRequest>,
-) -> AppResult<Json<HistoryEvent>> {
-    let me = me.require(Permission::EditTickets)?.clone();
-    let t = state
-        .db
-        .ticket(id)
-        .await?
-        .ok_or(AppError::NotFound("ticket"))?;
-    let body = text("comment", &req.text, 5_000, true)?;
-    let ev = state
-        .record(
-            HistoryKind::Comment,
-            Actor::User(me.id),
-            Refs::ticket(&t),
-            body.clone(),
-            Some(json!({ "author": me.name })),
-        )
-        .await
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("could not save comment")))?;
-    Ok(Json(ev))
 }
 
 pub async fn delete_ticket(
