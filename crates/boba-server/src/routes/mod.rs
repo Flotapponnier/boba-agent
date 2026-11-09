@@ -57,8 +57,20 @@ pub fn api() -> Router<SharedState> {
         .route("/skills/rescan", post(work::rescan_skills))
         .route("/skills/{id}", get(work::get_skill).put(work::update_skill))
         .route("/repos", post(board::create_repo))
-        .route("/repos/{id}", axum::routing::delete(board::delete_repo))
+        .route(
+            "/repos/{id}",
+            patch(board::update_repo).delete(board::delete_repo),
+        )
         .route("/health", get(|| async { "ok" }))
+        // quests
+        .route("/jobs", post(crate::jobs::create))
+        .route("/jobs/preview-schedule", post(crate::jobs::preview))
+        .route(
+            "/jobs/{id}",
+            patch(crate::jobs::update).delete(crate::jobs::delete),
+        )
+        .route("/jobs/{id}/run", post(crate::jobs::run_now))
+        .route("/jobs/{id}/runs", get(crate::jobs::runs))
         // remote runners
         .route("/runners", post(crate::runners_api::create))
         .route("/runners/ws", get(crate::runners_api::upgrade))

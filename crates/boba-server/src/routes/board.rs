@@ -375,6 +375,51 @@ pub async fn create_repo(
     Ok(Json(repo))
 }
 
+pub async fn update_repo(
+    State(state): State<SharedState>,
+    me: Auth,
+    Path(id): Path<Id>,
+    Json(req): Json<UpdateRepo>,
+) -> AppResult<Json<Repo>> {
+    me.require(Permission::ManageWorkspace)?;
+    let mut repo = state.db.repo(id).await?.ok_or(AppError::NotFound("repo"))?;
+    if let Some(n) = req.name {
+        let n = n.trim().to_string();
+        if n.is_empty() || n.chars().count() > 80 {
+            return Err(AppError::bad("repository names must be 1 to 80 characters"));
+        }
+        repo.name = n;
+    }
+    if let Some(p) = req.path {
+        let p = p.trim().to_string();
+        if !state.cfg.demo_mode && !std::path::Path::new(&p).join(".git").exists() {
+            return Err(AppError::bad(format!("{p} is not a git repository")));
+        }
+        repo.path = p;
+    }
+    if let Some(u) = req.remote_url {
+        repo.remote_url = u.filter(|s| !s.trim().is_empty());
+    }
+    if let Some(b) = req.default_branch.filter(|b| !b.trim().is_empty()) {
+        repo.default_branch = b.trim().to_string();
+    }
+    if let Some(sync) = req.sync {
+        if sync.enabled && sync.poll_minutes < 1 {
+            return Err(AppError::bad("sync polls at most every minute"));
+        }
+        if let Some(t) = sync.target_tab_id {
+            state.db.tab(t).await?.ok_or(AppError::NotFound("tab"))?;
+        }
+        repo.sync = sync;
+    }
+    if let Some(a) = req.ai_attribution {
+        repo.ai_attribution = a;
+    }
+    state.db.save_repo(&repo).await?;
+    state.upsert(Entity::Repo(repo.clone()));
+    Ok(Json(repo))
+}
+
 pub async fn delete_repo(
     State(state): State<SharedState>,
     me: Auth,

@@ -345,8 +345,7 @@ impl Db {
             default_branch: row.try_get("default_branch")?,
             runner_id: opt_id(row, "runner_id")?,
             sync: serde_json::from_str(&row.try_get::<String, _>("sync")?).unwrap_or_default(),
-            // TODO(server): persist (column `ai_attribution`, default 1).
-            ai_attribution: true,
+            ai_attribution: row.try_get::<i64, _>("ai_attribution")? != 0,
         })
     }
 
@@ -371,11 +370,12 @@ impl Db {
 
     pub async fn save_repo(&self, r: &Repo) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO repos(id, name, path, remote_url, default_branch, runner_id, sync)
-             VALUES(?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO repos(id, name, path, remote_url, default_branch, runner_id, sync, ai_attribution)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, path = excluded.path,
                remote_url = excluded.remote_url, default_branch = excluded.default_branch,
-               runner_id = excluded.runner_id, sync = excluded.sync",
+               runner_id = excluded.runner_id, sync = excluded.sync,
+               ai_attribution = excluded.ai_attribution",
         )
         .bind(r.id.to_string())
         .bind(&r.name)
@@ -384,6 +384,7 @@ impl Db {
         .bind(&r.default_branch)
         .bind(s(r.runner_id))
         .bind(json(&r.sync))
+        .bind(r.ai_attribution as i64)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -1080,6 +1081,8 @@ impl Db {
     pub async fn snapshot_runs(&self) -> anyhow::Result<Vec<Run>> {
         sqlx::query(
             "SELECT * FROM runs r WHERE r.status IN ('queued', 'running', 'waiting')
+                OR r.id = (SELECT r3.id FROM runs r3 WHERE r3.job_id = r.job_id
+                           ORDER BY r3.created_at DESC LIMIT 1)
                 OR r.id = (SELECT r2.id FROM runs r2 WHERE r2.ticket_id = r.ticket_id
                            ORDER BY r2.created_at DESC LIMIT 1)
              ORDER BY r.created_at",
@@ -1633,6 +1636,124 @@ impl Db {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    // ------------------------------------------------------------ jobs
+
+    fn job_row(row: &SqliteRow) -> anyhow::Result<boba_core::automation::Job> {
+        Ok(boba_core::automation::Job {
+            id: id(row, "id")?,
+            name: row.try_get("name")?,
+            description: row.try_get("description")?,
+            icon: row.try_get("icon")?,
+            agent_id: id(row, "agent_id")?,
+            prompt: row.try_get("prompt")?,
+            schedule: serde_json::from_str(&row.try_get::<String, _>("schedule")?)?,
+            output: dec(&row.try_get::<String, _>("output")?)?,
+            enabled: row.try_get::<i64, _>("enabled")? != 0,
+            repo_id: opt_id(row, "repo_id")?,
+            tab_id: opt_id(row, "tab_id")?,
+            skip_if_running: row.try_get::<i64, _>("skip_if_running")? != 0,
+            last_run_id: opt_id(row, "last_run_id")?,
+            last_run_at: opt_time(row, "last_run_at")?,
+            next_run_at: opt_time(row, "next_run_at")?,
+            last_result: row.try_get("last_result")?,
+            runs_count: row.try_get::<i64, _>("runs_count")? as u32,
+            created_by: opt_id(row, "created_by")?,
+            created_at: time(row, "created_at")?,
+        })
+    }
+
+    pub async fn jobs(&self) -> anyhow::Result<Vec<boba_core::automation::Job>> {
+        sqlx::query("SELECT * FROM jobs ORDER BY created_at")
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .map(Self::job_row)
+            .collect()
+    }
+
+    pub async fn job(&self, jid: Id) -> anyhow::Result<Option<boba_core::automation::Job>> {
+        sqlx::query("SELECT * FROM jobs WHERE id = ?")
+            .bind(jid.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .as_ref()
+            .map(Self::job_row)
+            .transpose()
+    }
+
+    /// Enabled jobs whose next fire time has come.
+    pub async fn due_jobs(
+        &self,
+        now: DateTime<Utc>,
+    ) -> anyhow::Result<Vec<boba_core::automation::Job>> {
+        sqlx::query(
+            "SELECT * FROM jobs WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
+             ORDER BY next_run_at",
+        )
+        .bind(ts(now))
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(Self::job_row)
+        .collect()
+    }
+
+    pub async fn save_job(&self, j: &boba_core::automation::Job) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO jobs(id, name, description, icon, agent_id, prompt, schedule, output, enabled,
+               repo_id, tab_id, skip_if_running, last_run_id, last_run_at, next_run_at, last_result,
+               runs_count, created_by, created_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description,
+               icon = excluded.icon, agent_id = excluded.agent_id, prompt = excluded.prompt,
+               schedule = excluded.schedule, output = excluded.output, enabled = excluded.enabled,
+               repo_id = excluded.repo_id, tab_id = excluded.tab_id,
+               skip_if_running = excluded.skip_if_running, last_run_id = excluded.last_run_id,
+               last_run_at = excluded.last_run_at, next_run_at = excluded.next_run_at,
+               last_result = excluded.last_result, runs_count = excluded.runs_count",
+        )
+        .bind(j.id.to_string())
+        .bind(&j.name)
+        .bind(&j.description)
+        .bind(&j.icon)
+        .bind(j.agent_id.to_string())
+        .bind(&j.prompt)
+        .bind(json(&j.schedule))
+        .bind(enc(&j.output))
+        .bind(j.enabled as i64)
+        .bind(s(j.repo_id))
+        .bind(s(j.tab_id))
+        .bind(j.skip_if_running as i64)
+        .bind(s(j.last_run_id))
+        .bind(j.last_run_at.map(ts))
+        .bind(j.next_run_at.map(ts))
+        .bind(&j.last_result)
+        .bind(j.runs_count as i64)
+        .bind(s(j.created_by))
+        .bind(ts(j.created_at))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_job(&self, jid: Id) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM jobs WHERE id = ?")
+            .bind(jid.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn job_runs(&self, jid: Id) -> anyhow::Result<Vec<Run>> {
+        sqlx::query("SELECT * FROM runs WHERE job_id = ? ORDER BY created_at DESC LIMIT 200")
+            .bind(jid.to_string())
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .map(Self::run_row)
+            .collect()
     }
 
     // ------------------------------------------------------------ remote runners

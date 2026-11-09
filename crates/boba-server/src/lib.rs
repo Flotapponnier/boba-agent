@@ -10,12 +10,14 @@ pub mod connectors;
 pub mod db;
 pub mod error;
 pub mod hub;
+pub mod jobs;
 pub mod notify;
 pub mod orchestrator;
 pub mod remote;
 pub mod router;
 pub mod routes;
 pub mod runners_api;
+pub mod scheduler;
 pub mod seed;
 pub mod skills;
 pub mod speech;
@@ -45,6 +47,7 @@ pub async fn build(
         tracing::warn!(error = ?e, "initial skill scan failed");
     }
     orchestrator::recover(&state).await?;
+    scheduler::spawn(state.clone());
     let router = router(state.clone());
     Ok((state, router))
 }

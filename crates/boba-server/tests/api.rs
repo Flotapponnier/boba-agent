@@ -110,11 +110,13 @@ impl Runner for FakeRunner {
                 .resume_session_id
                 .clone()
                 .unwrap_or_else(|| format!("sess-{id}"));
-            let t = spec.ticket.clone().expect("ticket runs only");
-            let branch = t
-                .branch
-                .clone()
-                .unwrap_or_else(|| format!("boba/T-{}", t.number));
+            let branch = match &spec.ticket {
+                Some(t) => t
+                    .branch
+                    .clone()
+                    .unwrap_or_else(|| format!("boba/T-{}", t.number)),
+                None => String::new(), // job runs work outside a ticket branch
+            };
             let _ = tx
                 .send(RunUpdate::Started {
                     worktree_path: format!("/tmp/wt/{id}"),
@@ -138,10 +140,12 @@ impl Runner for FakeRunner {
                     output_tokens: 200,
                 })
                 .await;
-            if hang && spec.kind == RunKind::Work {
+            if hang && matches!(spec.kind, RunKind::Work | RunKind::Job) {
                 return; // tx kept alive in `live`
             }
-            if spec.kind == RunKind::Work && spec.ticket.as_ref().unwrap().pr_number.is_none() {
+            if spec.kind == RunKind::Work
+                && spec.ticket.as_ref().is_some_and(|t| t.pr_number.is_none())
+            {
                 let _ = tx
                     .send(RunUpdate::PrOpened {
                         number: 7,
@@ -210,7 +214,7 @@ impl Runner for FakeRunner {
 struct Srv {
     base: String,
     runner: FakeRunner,
-    _state: SharedState,
+    state: SharedState,
     dir: PathBuf,
 }
 
@@ -236,7 +240,7 @@ async fn start_with(dir: PathBuf, runners: Runners, runner: FakeRunner) -> Srv {
     Srv {
         base: format!("http://{addr}/api"),
         runner,
-        _state: state,
+        state,
         dir,
     }
 }
@@ -2333,5 +2337,243 @@ async fn connector_secrets_never_reach_a_members_personal_runner() {
             .get("SENTRY_TOKEN")
             .map(String::as_str),
         Some("s3cr3t-token-value")
+    );
+}
+
+// ---------------------------------------------------------------- quests
+
+#[tokio::test]
+async fn quests_run_now_schedule_and_results() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let pinky = agent(&snap, "Pinky SEO").id;
+
+    // Preview: valid cron with a description, invalid one explained.
+    let (_, p) = srv
+        .post(
+            &member,
+            "/jobs/preview-schedule",
+            json!({"type": "cron", "expr": "0 9 * * 1", "timezone": "Europe/Paris"}),
+        )
+        .await;
+    assert_eq!(
+        (p["valid"].clone(), p["next"].as_array().unwrap().len()),
+        (json!(true), 5)
+    );
+    let (_, p) = srv
+        .post(
+            &member,
+            "/jobs/preview-schedule",
+            json!({"type": "interval", "minutes": 1}),
+        )
+        .await;
+    assert_eq!(p["valid"], false);
+    assert!(p["error"].as_str().unwrap().contains("5 minutes"));
+
+    // Only ManageAutomations creates quests.
+    let body = json!({"name": "Weekly SEO audit", "agent_id": pinky, "prompt": "Audit the docs pages",
+        "schedule": {"type": "interval", "minutes": 60}, "output": "report"});
+    assert_eq!(
+        srv.post(&member, "/jobs", body.clone()).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (s, job) = srv.post(&owner, "/jobs", body).await;
+    assert_eq!(s, StatusCode::OK, "{job}");
+    let job_id: Id = serde_json::from_value(job["id"].clone()).unwrap();
+    let next: chrono::DateTime<chrono::Utc> =
+        serde_json::from_value(job["next_run_at"].clone()).unwrap();
+    assert!((next - chrono::Utc::now()).num_minutes() >= 59);
+    assert_eq!(srv.snapshot(&member).await.jobs.len(), 1);
+
+    // Run now (RunAgents is enough): a job run without a ticket.
+    let (s, run) = srv
+        .post(&member, &format!("/jobs/{job_id}/run"), json!({}))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{run}");
+    assert_eq!(
+        (
+            run["kind"].clone(),
+            run["job_id"].clone(),
+            run["ticket_id"].clone()
+        ),
+        (json!("job"), json!(job_id), Value::Null)
+    );
+    let snap = srv
+        .until(&owner, "quest done", |s| {
+            s.jobs[0].last_result.is_some() && all_idle(s)
+        })
+        .await;
+    let j = &snap.jobs[0];
+    assert_eq!((j.runs_count, j.last_result.as_deref()), (1, Some("done")));
+    assert_eq!(agent(&snap, "Pinky SEO").xp, 25);
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.kind == RunKind::Job)
+        .unwrap();
+    let js = spec.job.unwrap();
+    assert_eq!(
+        (js.prompt.as_str(), js.previous_result.clone()),
+        ("Audit the docs pages", None)
+    );
+    assert!(spec.ticket.is_none() && spec.repo.is_none());
+    // Creator and the member who pressed Run now are told.
+    for c in [&owner, &member] {
+        let n = srv.snapshot(c).await.notifications;
+        assert!(n
+            .iter()
+            .any(|n| boba_server::db::enc(&n.kind) == "job_result" && n.job_id == Some(job_id)));
+    }
+    let (_, runs) = srv.get(&member, &format!("/jobs/{job_id}/runs")).await;
+    assert_eq!(runs.as_array().unwrap().len(), 1);
+
+    // The next run gets the previous report.
+    srv.post(&owner, &format!("/jobs/{job_id}/run"), json!({}))
+        .await;
+    srv.until(&owner, "second run", |s| {
+        s.jobs[0].runs_count == 2 && all_idle(s)
+    })
+    .await;
+    let second = srv
+        .runner
+        .specs()
+        .into_iter()
+        .filter(|s| s.kind == RunKind::Job)
+        .nth(1)
+        .unwrap();
+    assert_eq!(second.job.unwrap().previous_result.as_deref(), Some("done"));
+
+    // Scheduled firing: a tick after next_run_at starts it and moves next_run_at on.
+    let later = chrono::Utc::now() + chrono::Duration::minutes(61);
+    boba_server::jobs::run_due(&srv.state, later).await.unwrap();
+    let snap = srv
+        .until(&owner, "scheduled run", |s| {
+            s.jobs[0].runs_count == 3 && all_idle(s)
+        })
+        .await;
+    let next2 = snap.jobs[0].next_run_at.unwrap();
+    assert!(
+        next2 > later + chrono::Duration::minutes(59),
+        "next fire is computed from the tick"
+    );
+
+    // skip_if_running: a second Run now while it runs is refused.
+    srv.runner.hang(true);
+    srv.post(&owner, &format!("/jobs/{job_id}/run"), json!({}))
+        .await;
+    let (s, v) = srv
+        .post(&owner, &format!("/jobs/{job_id}/run"), json!({}))
+        .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{v}");
+    assert_eq!(
+        srv.req(&owner, "DELETE", &format!("/jobs/{job_id}"), None)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+
+    // Disable: no next fire time. Bad schedule on update: 400.
+    let (s, v) = srv
+        .req(
+            &owner,
+            "PATCH",
+            &format!("/jobs/{job_id}"),
+            Some(json!({"enabled": false})),
+        )
+        .await;
+    assert_eq!((s, v["next_run_at"].clone()), (StatusCode::OK, Value::Null));
+    let (s, _) = srv
+        .req(
+            &owner,
+            "PATCH",
+            &format!("/jobs/{job_id}"),
+            Some(json!({"schedule": {"type": "cron", "expr": "nope", "timezone": "UTC"}})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn repo_settings_persist_and_reach_the_runner() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let (_, repo) = srv
+        .post(
+            &owner,
+            "/repos",
+            json!({"name": "app", "path": "/srv/app", "remote_url": "https://github.com/acme/app"}),
+        )
+        .await;
+    assert_eq!(repo["ai_attribution"], true);
+    let rid = repo["id"].as_str().unwrap();
+    assert_eq!(
+        srv.req(
+            &member,
+            "PATCH",
+            &format!("/repos/{rid}"),
+            Some(json!({"ai_attribution": false}))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (s, v) = srv
+        .req(
+            &owner,
+            "PATCH",
+            &format!("/repos/{rid}"),
+            Some(json!({"ai_attribution": false, "default_branch": "trunk"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let snap2 = srv.snapshot(&owner).await;
+    let r = snap2
+        .repos
+        .iter()
+        .find(|r| r.id.to_string() == rid)
+        .unwrap();
+    assert_eq!(
+        (r.ai_attribution, r.default_branch.as_str()),
+        (false, "trunk")
+    );
+    // A run in a tab using that repo carries the flag.
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/tabs/{}", snap.tabs[0].id),
+        Some(json!({"repo_id": rid})),
+    )
+    .await;
+    let t = snap
+        .tickets
+        .iter()
+        .find(|t| t.tab_id == snap.tabs[0].id)
+        .unwrap()
+        .id;
+    srv.post(
+        &owner,
+        &format!("/tickets/{t}/assign"),
+        json!({"agent_id": agent(&snap, "Boba Dev").id}),
+    )
+    .await;
+    srv.until(&owner, "ran", |s| {
+        s.runs.iter().any(|r| r.ticket_id == Some(t))
+    })
+    .await;
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.ticket.as_ref().is_some_and(|x| x.id == t))
+        .unwrap();
+    let repo = spec.repo.unwrap();
+    assert_eq!(
+        (repo.ai_attribution, repo.default_branch.as_str()),
+        (false, "trunk")
     );
 }
