@@ -273,6 +273,115 @@ impl Tools {
         Ok(n.parse().unwrap_or(0))
     }
 
+    /// Rewrite the messages of the commits in `base..HEAD` with `clean`, keeping trees,
+    /// authors and dates. Commits whose message does not change keep their hash, so
+    /// already-pushed history is untouched. Returns how many commits were rewritten.
+    /// Merge commits stop the rewrite (returns an error, nothing is changed).
+    pub async fn rewrite_messages(
+        &self,
+        wt: &Path,
+        base: &str,
+        clean: impl Fn(&str) -> String,
+    ) -> anyhow::Result<usize> {
+        let list = self
+            .git(
+                wt,
+                &[
+                    "rev-list",
+                    "--reverse",
+                    "--parents",
+                    &format!("{base}..HEAD"),
+                ],
+            )
+            .await?;
+        if list.is_empty() {
+            return Ok(0);
+        }
+        let mut parent: Option<String> = None;
+        let mut rewritten = 0;
+        for line in list.lines() {
+            let ids: Vec<&str> = line.split_whitespace().collect();
+            let (commit, parents) = (ids[0], &ids[1..]);
+            if parents.len() != 1 {
+                bail!("{commit} is a merge commit; not rewriting history");
+            }
+            let msg = self
+                .git_raw(wt, &["log", "-1", "--format=%B", commit])
+                .await?;
+            let new_msg = clean(&msg);
+            let new_parent = parent.clone().unwrap_or_else(|| parents[0].to_string());
+            if new_msg == msg && new_parent == parents[0] {
+                parent = Some(commit.to_string());
+                continue;
+            }
+            let meta = self
+                .git(
+                    wt,
+                    &[
+                        "log",
+                        "-1",
+                        "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%T",
+                        commit,
+                    ],
+                )
+                .await?;
+            let f: Vec<&str> = meta.split('\0').collect();
+            if f.len() < 7 {
+                bail!("unexpected git log output for {commit}");
+            }
+            let mut cmd = Command::new(&self.git);
+            cmd.args(["commit-tree", f[6], "-p", &new_parent, "-F", "-"])
+                .current_dir(wt)
+                .env("GIT_AUTHOR_NAME", f[0])
+                .env("GIT_AUTHOR_EMAIL", f[1])
+                .env("GIT_AUTHOR_DATE", f[2])
+                .env("GIT_COMMITTER_NAME", f[3])
+                .env("GIT_COMMITTER_EMAIL", f[4])
+                .env("GIT_COMMITTER_DATE", f[5])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let mut child = cmd.spawn()?;
+            if let Some(mut stdin) = child.stdin.take() {
+                use tokio::io::AsyncWriteExt;
+                stdin.write_all(new_msg.as_bytes()).await?;
+            }
+            let out = child.wait_with_output().await?;
+            if !out.status.success() {
+                bail!(
+                    "git commit-tree failed: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+            }
+            parent = Some(String::from_utf8_lossy(&out.stdout).trim().to_string());
+            rewritten += 1;
+        }
+        if rewritten > 0 {
+            let new_head = parent.unwrap_or_default();
+            // Same tree as before: only the branch ref moves, the working tree is untouched.
+            self.git(wt, &["reset", "--soft", &new_head]).await?;
+        }
+        Ok(rewritten)
+    }
+
+    /// Like `git` but keeps stdout untrimmed (commit messages).
+    async fn git_raw(&self, cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
+        let out = Command::new(&self.git)
+            .args(args)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .output()
+            .await?;
+        if !out.status.success() {
+            bail!(
+                "`git {}` failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
     pub async fn push(&self, wt: &Path, branch: &str) -> anyhow::Result<()> {
         self.git(
             wt,

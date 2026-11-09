@@ -623,3 +623,56 @@ async fn subscription_mode_uses_the_default_config_dir_and_no_api_key() {
         .to_string();
     assert!(err.contains("claude auth login"), "{err}");
 }
+
+#[test]
+fn strips_ai_attribution() {
+    let msg = "Fix x\n\nBody.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nCo-authored-by: Jane <j@x.io>\n";
+    assert_eq!(
+        strip_ai_attribution(msg),
+        "Fix x\n\nBody.\n\nCo-authored-by: Jane <j@x.io>\n"
+    );
+    let pr = "Summary\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)";
+    assert_eq!(strip_ai_attribution(pr), "Summary");
+    assert_eq!(strip_ai_attribution("plain\n"), "plain\n");
+}
+
+#[tokio::test]
+async fn no_ai_attribution_rewrites_commits_and_sets_claude_settings() {
+    let e = env().await;
+    let r = runner(&e, "commit_attr");
+    let mut s = spec(&e, RunKind::Work);
+    s.repo.as_mut().unwrap().ai_attribution = false;
+    let updates = run(&r, s).await;
+    let o = outcome(&updates);
+    assert_eq!(o.status, RunStatus::Succeeded, "{o:?}");
+    assert!(texts(&updates, LogKind::System)
+        .iter()
+        .any(|t| t.contains("Removed AI attribution from 2 commit")));
+    let args = read(&e.out.join("args.txt"));
+    assert!(args.contains(r#""includeCoAuthoredBy":false"#), "{args}");
+    let log = crate::git::run(
+        Path::new("git"),
+        &["log", "--format=%B%x1e%an", "main..boba/T-5-add-feature"],
+        &e.root.join("origin.git"),
+    )
+    .await
+    .unwrap();
+    assert!(!log.to_lowercase().contains("claude"), "{log}");
+    assert!(log.contains("Body line."), "message body kept: {log}");
+    assert!(log.contains("\u{1e}T"), "author kept: {log}");
+
+    // With attribution allowed (default), nothing is rewritten and no --settings flag.
+    let e2 = env().await;
+    let r2 = runner(&e2, "commit_attr");
+    let updates = run(&r2, spec(&e2, RunKind::Work)).await;
+    assert_eq!(outcome(&updates).status, RunStatus::Succeeded);
+    assert!(!read(&e2.out.join("args.txt")).contains("includeCoAuthoredBy"));
+    let log = crate::git::run(
+        Path::new("git"),
+        &["log", "--format=%B", "main..boba/T-5-add-feature"],
+        &e2.root.join("origin.git"),
+    )
+    .await
+    .unwrap();
+    assert!(log.contains("Co-Authored-By: Claude"));
+}

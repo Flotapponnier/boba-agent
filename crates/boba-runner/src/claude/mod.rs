@@ -995,6 +995,11 @@ pub fn claude_args(
             a.push(session_id.into());
         }
     }
+    if spec.repo.as_ref().is_some_and(|r| !r.ai_attribution) {
+        // Both keys: `includeCoAuthoredBy` (older) and `attribution` (newer), verified on 2.1.319.
+        a.push("--settings".into());
+        a.push(r#"{"includeCoAuthoredBy":false,"attribution":{"commit":"","pr":""}}"#.into());
+    }
     if spec.kind == RunKind::Command {
         // The concierge has no tools at all: it only reads the prompt and proposes a plan.
         a.push("--tools".into());
@@ -1414,6 +1419,24 @@ async fn finish_pr(
             ..emit::outcome(RunStatus::Succeeded)
         });
     }
+    if !repo_spec.ai_attribution {
+        match cfg
+            .tools
+            .rewrite_messages(wt, &place.base, strip_ai_attribution)
+            .await
+        {
+            Ok(0) => {}
+            Ok(n) => {
+                em.system(format!("Removed AI attribution from {n} commit message(s)"))
+                    .await?
+            }
+            Err(e) => {
+                return fail(format!(
+                    "Could not remove AI attribution from commits: {e:#}"
+                ))
+            }
+        }
+    }
     em.progress(0.94, "Pushing").await?;
     if let Err(e) = cfg.tools.push(wt, &place.branch).await {
         return fail(format!("Could not push {}: {e:#}", place.branch));
@@ -1424,12 +1447,19 @@ async fn finish_pr(
     ))
     .await?;
     em.progress(0.97, "Opening pull request").await?;
-    let body = format!(
-        "{}\n\n---\n{label} · opened by Boba Agent ({}, {})",
-        summary.as_deref().unwrap_or("(no summary)"),
-        spec.agent.name,
-        spec.agent.role
-    );
+    let body = if repo_spec.ai_attribution {
+        format!(
+            "{}\n\n---\n{label} · opened by Boba Agent ({}, {})",
+            summary.as_deref().unwrap_or("(no summary)"),
+            spec.agent.name,
+            spec.agent.role
+        )
+    } else {
+        format!(
+            "{}\n\n---\n{label}",
+            strip_ai_attribution(summary.as_deref().unwrap_or("(no summary)")).trim_end()
+        )
+    };
     match cfg
         .tools
         .open_pr(wt, &place.branch, &repo_spec.default_branch, title, &body)
@@ -1459,6 +1489,26 @@ async fn finish_pr(
         summary,
         ..emit::outcome(RunStatus::Succeeded)
     })
+}
+
+/// Remove AI attribution lines (co-author trailers for Claude/Anthropic, "Generated with
+/// Claude Code" footers) from a commit message or PR body. Keeps a trailing newline if the
+/// input had one, and collapses the blank lines left behind at the end.
+pub fn strip_ai_attribution(text: &str) -> String {
+    let is_attr = |l: &str| {
+        let t = l.trim().to_ascii_lowercase();
+        (t.starts_with("co-authored-by:") && (t.contains("claude") || t.contains("anthropic")))
+            || t.contains("generated with [claude code]")
+            || t.contains("generated with claude code")
+            || t.contains("claude.com/claude-code")
+            || t.contains("claude.ai/code")
+    };
+    let kept: Vec<&str> = text.lines().filter(|l| !is_attr(l)).collect();
+    let mut out = kept.join("\n").trim_end().to_string();
+    if text.ends_with('\n') && !out.is_empty() {
+        out.push('\n');
+    }
+    out
 }
 
 fn finish_review(result: &ResultInfo) -> RunOutcome {
