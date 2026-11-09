@@ -71,6 +71,15 @@ function qs(q: Partial<Record<string, string | number | null | undefined>>): str
   return s ? `?${s}` : '';
 }
 
+/** `GET /api/github/app/manifest` (PR #45, not in core yet): data for the GitHub App manifest form. */
+export interface GithubManifest {
+  name: string;
+  /** Where the browser POSTs the form (carries a fresh single-use `state`). */
+  action_url: string;
+  manifest: Record<string, unknown>;
+  warnings: string[];
+}
+
 /** Typed REST client, one function per endpoint of docs/API.md. */
 export const api = {
   authStatus: () => req<AuthStatus>('GET', '/api/auth/status'),
@@ -147,6 +156,8 @@ export const api = {
 
   githubApp: () => req<GithubAppStatus>('GET', '/api/github/app'),
   githubRepos: () => req<GithubRepo[]>('GET', '/api/github/repos'),
+  /** Mints a fresh single-use state: call it when the setup page opens, not in advance. */
+  githubManifest: (org?: string, name?: string) => req<GithubManifest>('GET', `/api/github/app/manifest${qs({ org, name })}`),
   /** Full-page navigation target (GitHub's app-manifest flow), not a fetch. */
   githubSetupUrl: (org?: string, name?: string) => `/api/github/app/setup${qs({ org, name })}`,
 };
