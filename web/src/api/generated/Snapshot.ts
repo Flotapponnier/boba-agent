@@ -3,6 +3,7 @@ import type { Agent } from "./Agent";
 import type { Connector } from "./Connector";
 import type { HistoryEvent } from "./HistoryEvent";
 import type { Job } from "./Job";
+import type { Notification } from "./Notification";
 import type { Repo } from "./Repo";
 import type { Run } from "./Run";
 import type { RunnerInfo } from "./RunnerInfo";
@@ -21,6 +22,10 @@ export type Snapshot = { me: User | null, tabs: Array<Tab>, agents: Array<Agent>
  * Non-terminal runs + the latest run of every ticket.
  */
 runs: Array<Run>, skills: Array<Skill>, repos: Array<Repo>, users: Array<User>, runners: Array<RunnerInfo>, jobs: Array<Job>, connectors: Array<Connector>, 
+/**
+ * The caller's unread + 50 latest notifications.
+ */
+notifications: Array<Notification>, 
 /**
  * Latest 100 history events, newest first.
  */

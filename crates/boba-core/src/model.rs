@@ -146,6 +146,23 @@ pub struct RunnerInfo {
     pub max_concurrent_runs: u32,
     pub active_runs: u32,
     pub last_seen_at: Option<DateTime<Utc>>,
+    #[serde(default = "default_scope")]
+    pub scope: crate::team::RunnerScope,
+    /// Set for personal runners.
+    pub owner_user_id: Option<Id>,
+    #[serde(default = "default_auth")]
+    pub auth: crate::team::RunnerAuth,
+    /// Machine label reported by the runner ("florent-mbp", "vps-1").
+    pub host: Option<String>,
+    /// Claude Code version on that machine.
+    pub claude_version: Option<String>,
+}
+
+fn default_scope() -> crate::team::RunnerScope {
+    crate::team::RunnerScope::Shared
+}
+fn default_auth() -> crate::team::RunnerAuth {
+    crate::team::RunnerAuth::Unknown
 }
 
 // ---------------------------------------------------------------- agents & skills
