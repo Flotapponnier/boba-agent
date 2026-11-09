@@ -702,17 +702,32 @@ pub async fn dispatch_queued_locked(state: &SharedState) {
             return;
         }
     };
+    let live: std::collections::HashSet<Id> =
+        state.live.lock().map(|l| l.clone()).unwrap_or_default();
+    // Runs already handed to each runner.
+    let mut handed: std::collections::HashMap<Option<Id>, u32> = std::collections::HashMap::new();
+    for r in queued.iter().filter(|r| live.contains(&r.id)) {
+        *handed.entry(r.runner_id).or_default() += 1;
+    }
     for run in queued.into_iter().filter(|r| r.status == RunStatus::Queued) {
-        // Runners queue internally past their capacity and send `Started` when a slot
-        // frees up, so every queued run is handed over right away and stays Queued.
-        let handed = state
-            .live
-            .lock()
-            .map(|l| l.contains(&run.id))
-            .unwrap_or(true);
-        if !handed {
-            dispatch_boxed(state, run).await;
+        if live.contains(&run.id) {
+            continue;
         }
+        // Built-in runners queue internally past their capacity and send `Started` when a
+        // slot frees up, so their runs are handed over right away. Remote runners only get
+        // what their (registered, Hello-capped) capacity allows; the rest waits here.
+        if let Some(slot) = state
+            .runners
+            .by_id(run.runner_id)
+            .filter(|s| s.remote.is_some())
+        {
+            let n = handed.entry(run.runner_id).or_default();
+            if *n >= slot.runner.max_concurrent_runs() {
+                continue;
+            }
+            *n += 1;
+        }
+        dispatch_boxed(state, run).await;
     }
     broadcast_runner(state).await;
 }
@@ -1592,12 +1607,28 @@ pub async fn abort_ticket_runs_locked(state: &SharedState, ticket_id: Id) -> any
     Ok(())
 }
 
-/// Startup: nothing survives a restart. Every non-terminal run is failed first, with no
-/// dispatching or auto review in between (so nothing is started and then marked failed),
-/// agents go Idle, and only then do the review queues resume once.
+/// Startup. Runs on the built-in runner died with the server: they are failed first, with
+/// no dispatching or auto review in between (nothing is started and then marked failed).
+/// Runs on a registered REMOTE runner may still be executing on that machine: they are
+/// adopted and wait for the runner to reconnect and list them in `Resume`; if it does not
+/// come back within the grace period they fail as lost. Then agents of failed runs go Idle
+/// and the review queues resume once.
 pub async fn recover(state: &SharedState) -> anyhow::Result<()> {
     let _g = state.orch_lock.lock().await;
+    let mut adopted: Vec<Id> = Vec::new();
     for run in state.db.active_runs().await? {
+        let remote = state
+            .runners
+            .by_id(run.runner_id)
+            .and_then(|s| s.remote.clone());
+        // Queued ones too: the machine may hold them in its own queue. If it doesn't list
+        // them in Resume they fail as lost.
+        if let Some(remote) = remote {
+            tracing::info!(run_id = %run.id, "waiting for its remote runner to resume the run");
+            adopt_remote_run(state, &run, &remote).await?;
+            adopted.push(run.id);
+            continue;
+        }
         tracing::info!(run_id = %run.id, "failing run interrupted by restart");
         finish_inner(
             state,
@@ -1615,13 +1646,42 @@ pub async fn recover(state: &SharedState) -> anyhow::Result<()> {
         .await?;
     }
     for mut a in state.db.agents().await? {
-        if a.status != AgentStatus::Idle || a.current_run_id.is_some() {
+        let busy_elsewhere = a.current_run_id.is_some_and(|r| adopted.contains(&r));
+        if !busy_elsewhere && (a.status != AgentStatus::Idle || a.current_run_id.is_some()) {
             a.status = AgentStatus::Idle;
             a.current_run_id = None;
             state.db.save_agent(&a).await?;
         }
     }
     drain_all_locked(state).await;
+    Ok(())
+}
+
+/// Re-attach a run to its (still offline) remote runner and arm the resume grace period.
+async fn adopt_remote_run(
+    state: &SharedState,
+    run: &Run,
+    remote: &std::sync::Arc<crate::remote::RemoteRunner>,
+) -> anyhow::Result<()> {
+    if let Ok(mut live) = state.live.lock() {
+        live.insert(run.id);
+    }
+    state.hub.open_run(run.id);
+    state.init_seq(run.id).await?;
+    let (tx, rx) = mpsc::channel::<RunUpdate>(512);
+    tokio::spawn(consume_boxed(state.clone(), run.id, rx));
+    remote.adopt(run.id, tx);
+    let remote = remote.clone();
+    let generation = remote.generation();
+    tokio::spawn(async move {
+        tokio::time::sleep(crate::remote::RESUME_GRACE).await;
+        // Never reconnected since the restart: the machine (or its run) is gone.
+        if !remote.is_online() && remote.generation() == generation {
+            remote
+                .fail_all("the runner did not come back after a server restart")
+                .await;
+        }
+    });
     Ok(())
 }
 

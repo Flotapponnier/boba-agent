@@ -257,13 +257,7 @@ async fn session(state: SharedState, row: RemoteRunnerRow, mut socket: WebSocket
     remote.set_max_runs(max_concurrent_runs);
     if let Err(e) = state
         .db
-        .update_remote_hello(
-            row.id,
-            auth,
-            &host,
-            claude_version.as_deref(),
-            max_concurrent_runs,
-        )
+        .update_remote_hello(row.id, auth, &host, claude_version.as_deref())
         .await
     {
         tracing::warn!(error = ?e, "saving runner hello");

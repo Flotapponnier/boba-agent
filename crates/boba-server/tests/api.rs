@@ -3541,3 +3541,195 @@ fn base64_decode(s: &str) -> Vec<u8> {
     }
     out
 }
+
+#[tokio::test]
+async fn remote_runs_survive_a_server_restart() {
+    let dir = tmp_dir();
+    let srv = start_in(dir.clone(), FakeRunner::new()).await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let (_, repo) = srv
+        .post(
+            &owner,
+            "/repos",
+            json!({"name": "app", "path": "/srv/app", "remote_url": "https://github.com/acme/app"}),
+        )
+        .await;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/tabs/{}", snap.tabs[0].id),
+        Some(json!({"repo_id": repo["id"]})),
+    )
+    .await;
+    let (_, v) = srv
+        .post(
+            &member,
+            "/runners",
+            json!({"name": "mbp", "scope": "personal"}),
+        )
+        .await;
+    let token = v["token"].as_str().unwrap().to_string();
+    let mut ws = runner_connect(&srv, &token).await.unwrap();
+    runner_send(&mut ws, hello("subscription")).await;
+    let rid = v["runner"]["id"].clone();
+    srv.until(&owner, "online", |s| {
+        s.runners.iter().any(|r| json!(r.id) == rid && r.online)
+    })
+    .await;
+    let t = snap.tickets[0].id;
+    let (_, run) = srv
+        .post(
+            &member,
+            &format!("/tickets/{t}/assign"),
+            json!({"agent_id": agent(&snap, "Golden QA").id}),
+        )
+        .await;
+    let start = runner_recv(&mut ws).await.unwrap();
+    let run_id = start["spec"]["run_id"].clone();
+    assert_eq!(run_id, run["id"]);
+    runner_send(
+        &mut ws,
+        json!({"type": "update", "run_id": run_id, "update":
+        {"type": "started", "worktree_path": "/w", "branch": "b", "session_id": "s"}}),
+    )
+    .await;
+    srv.until(&member, "running", |s| {
+        s.runs
+            .iter()
+            .any(|r| json!(r.id) == run_id && r.status == RunStatus::Running)
+    })
+    .await;
+    drop(ws);
+
+    // Restart: a second server on the same data dir. The run is not failed at boot...
+    let srv2 = start_in(dir, FakeRunner::new()).await;
+    let c2 = client();
+    srv2.post(
+        &c2,
+        "/auth/login",
+        json!({"email": "m@test.io", "password": "password123"}),
+    )
+    .await;
+    let s2 = srv2.snapshot(&c2).await;
+    let r = s2.runs.iter().find(|r| json!(r.id) == run_id).unwrap();
+    assert_eq!(
+        r.status,
+        RunStatus::Running,
+        "remote run failed at boot: {:?}",
+        r.error
+    );
+    assert_eq!(agent(&s2, "Golden QA").status, AgentStatus::Working);
+    // ...the runner reconnects, resumes it and finishes it.
+    let mut ws = runner_connect(&srv2, &token).await.unwrap();
+    runner_send(&mut ws, hello("subscription")).await;
+    runner_send(&mut ws, json!({"type": "resume", "run_ids": [run_id]})).await;
+    runner_send(&mut ws, json!({"type": "update", "run_id": run_id, "update": {"type": "finished", "outcome":
+        {"status": "succeeded", "summary": "done after restart", "verdict": null, "feedback": null, "error": null, "plan": null}}})).await;
+    // (The snapshot only shows a ticket's latest run: the review that follows. Ask the ticket.)
+    let mut done = None;
+    for _ in 0..200 {
+        let (_, runs) = srv2.get(&c2, &format!("/tickets/{t}/runs")).await;
+        if let Some(r) = runs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == run_id && r["status"] == "succeeded")
+        {
+            done = Some(r.clone());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        done.expect("work run finished")["summary"],
+        "done after restart"
+    );
+}
+
+#[tokio::test]
+async fn remote_capacity_is_the_smaller_of_registered_and_hello() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let (_, repo) = srv
+        .post(
+            &owner,
+            "/repos",
+            json!({"name": "app", "path": "/srv/app", "remote_url": "https://github.com/acme/app"}),
+        )
+        .await;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/tabs/{}", snap.tabs[0].id),
+        Some(json!({"repo_id": repo["id"]})),
+    )
+    .await;
+    let (_, v) = srv
+        .post(
+            &member,
+            "/runners",
+            json!({"name": "mbp", "scope": "personal", "max_concurrent_runs": 2}),
+        )
+        .await;
+    let rid = v["runner"]["id"].clone();
+    let mut ws = runner_connect(&srv, v["token"].as_str().unwrap())
+        .await
+        .unwrap();
+    runner_send(&mut ws, hello("subscription")).await; // the machine says 2… see hello(): 2
+    let mut h = hello("subscription");
+    h["max_concurrent_runs"] = json!(4);
+    let mut ws2 = runner_connect(&srv, v["token"].as_str().unwrap())
+        .await
+        .unwrap();
+    runner_send(&mut ws2, h).await; // a newer connection claiming 4
+    drop(ws);
+    let snap = srv
+        .until(&owner, "online", |s| {
+            s.runners.iter().any(|r| json!(r.id) == rid && r.online)
+        })
+        .await;
+    assert_eq!(
+        snap.runners
+            .iter()
+            .find(|r| json!(r.id) == rid)
+            .unwrap()
+            .max_concurrent_runs,
+        2
+    );
+
+    // Three runs: only two are handed over; the third waits for a free slot.
+    let tickets: Vec<Id> = snap
+        .tickets
+        .iter()
+        .filter(|t| t.tab_id == snap.tabs[0].id)
+        .map(|t| t.id)
+        .take(3)
+        .collect();
+    let agents = ["Boba Dev", "Golden QA", "Diamond Architect"];
+    for (t, a) in tickets.iter().zip(agents) {
+        let (s, v) = srv
+            .post(
+                &member,
+                &format!("/tickets/{t}/assign"),
+                json!({"agent_id": agent(&snap, a).id}),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+    }
+    let first = runner_recv(&mut ws2).await.unwrap();
+    let _second = runner_recv(&mut ws2).await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), ws2.next())
+            .await
+            .is_err(),
+        "a third Start arrived beyond the capacity"
+    );
+    runner_send(&mut ws2, json!({"type": "update", "run_id": first["spec"]["run_id"], "update": {"type": "finished", "outcome":
+        {"status": "succeeded", "summary": "ok", "verdict": null, "feedback": null, "error": null, "plan": null}}})).await;
+    let third = runner_recv(&mut ws2).await.unwrap();
+    assert_eq!(third["type"], "start");
+}

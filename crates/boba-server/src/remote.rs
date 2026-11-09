@@ -24,6 +24,8 @@ pub const RESUME_GRACE: Duration = Duration::from_secs(120);
 pub struct RemoteRunner {
     id: Id,
     name: String,
+    /// What the runner was registered with (the server never asks for more).
+    registered_max: u32,
     max_runs: AtomicU32,
     /// (connection generation, outgoing frames) while connected.
     conn: Mutex<Option<(u64, mpsc::Sender<RunnerWire>)>>,
@@ -39,6 +41,7 @@ impl RemoteRunner {
         Self {
             id,
             name,
+            registered_max: max_runs.max(1),
             max_runs: AtomicU32::new(max_runs.max(1)),
             conn: Mutex::new(None),
             generation: AtomicU64::new(0),
@@ -62,8 +65,20 @@ impl RemoteRunner {
         }
     }
 
-    pub fn set_max_runs(&self, n: u32) {
-        self.max_runs.store(n.clamp(1, 64), Ordering::Relaxed);
+    /// The machine's own limit from Hello: the effective one is the smaller of the two.
+    pub fn set_max_runs(&self, hello: u32) {
+        self.max_runs.store(
+            hello.clamp(1, 64).min(self.registered_max),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// After a server restart: take back a run this runner was executing, so its buffered
+    /// updates (sent after Resume) reach the orchestrator again.
+    pub fn adopt(&self, run_id: Id, updates: UpdateTx) {
+        if let Ok(mut r) = self.runs.lock() {
+            r.insert(run_id, updates);
+        }
     }
 
     pub fn set_skills(&self, skills: Vec<Skill>) {
