@@ -77,6 +77,7 @@ enum LogCmd {
 impl AppState {
     pub async fn new(cfg: Config, runner: Arc<dyn Runner>) -> anyhow::Result<SharedState> {
         let db = Db::open(&cfg.data_dir).await?;
+        crate::connectors::init_secret_key(&cfg.data_dir)?;
         let (tx, rx) = mpsc::channel(8192);
         tokio::spawn(log_writer(db.clone(), rx));
         Ok(Arc::new(Self {
@@ -291,9 +292,9 @@ impl AppState {
             history,
             settings: db.workspace_settings(self.cfg.demo_mode).await?,
             stats: self.stats().await?,
-            // Filled once the scheduler and connectors land.
+            // Filled once the scheduler lands.
             jobs: Vec::new(),
-            connectors: Vec::new(),
+            connectors: crate::connectors::list(&self.db).await?,
         })
     }
 }

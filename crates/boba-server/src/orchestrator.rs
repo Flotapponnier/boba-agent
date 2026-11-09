@@ -389,6 +389,7 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         .agent(run.agent_id)
         .await?
         .ok_or(AppError::NotFound("agent"))?;
+    let mcp_servers = crate::connectors::resolve_mcp_servers(db, &agent).await?;
     let tab = db
         .tab(ticket.tab_id)
         .await?
@@ -439,7 +440,7 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         command: None,
         repo,
         // Connectors and board tools are wired in follow-up PRs.
-        mcp_servers: Vec::new(),
+        mcp_servers,
         board_tools: None,
         skill_paths,
         resume_session_id: resume,
