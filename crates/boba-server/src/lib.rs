@@ -1,0 +1,83 @@
+//! # boba-server
+//!
+//! axum REST + WebSocket API, SQLite persistence, auth/RBAC, the run orchestrator and the
+//! embedded web UI. The binary (`boba-agent`) is a thin wrapper around [`build`].
+
+pub mod auth;
+pub mod config;
+pub mod db;
+pub mod error;
+pub mod hub;
+pub mod orchestrator;
+pub mod routes;
+pub mod seed;
+pub mod skills;
+pub mod state;
+pub mod web;
+pub mod ws;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::http::{header, HeaderValue, Method};
+use axum::Router;
+use boba_runner::Runner;
+use tower_http::compression::CompressionLayer;
+use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
+
+pub use config::Config;
+pub use state::{AppState, SharedState};
+
+/// Open the database, recover from a previous crash, discover skills and build the router.
+pub async fn build(cfg: Config, runner: Arc<dyn Runner>) -> anyhow::Result<(SharedState, Router)> {
+    let state = AppState::new(cfg, runner).await?;
+    if let Err(e) = skills::rescan(&state).await {
+        tracing::warn!(error = ?e, "initial skill scan failed");
+    }
+    orchestrator::recover(&state).await?;
+    let router = router(state.clone());
+    Ok((state, router))
+}
+
+pub fn router(state: SharedState) -> Router {
+    let mut app = Router::new()
+        .nest("/api", routes::api())
+        .fallback(web::serve)
+        .layer(CompressionLayer::new())
+        .layer(TraceLayer::new_for_http());
+    if let Some(origin) = &state.cfg.dev_cors {
+        match origin.parse::<HeaderValue>() {
+            Ok(o) => {
+                app = app.layer(
+                    CorsLayer::new()
+                        .allow_origin(o)
+                        .allow_credentials(true)
+                        .allow_methods([
+                            Method::GET,
+                            Method::POST,
+                            Method::PATCH,
+                            Method::PUT,
+                            Method::DELETE,
+                        ])
+                        .allow_headers([header::CONTENT_TYPE]),
+                );
+            }
+            Err(_) => tracing::warn!(%origin, "ignoring invalid BOBA_DEV_CORS"),
+        }
+    }
+    app.with_state(state)
+}
+
+/// Background housekeeping: expired sessions.
+pub fn spawn_housekeeping(state: SharedState) {
+    tokio::spawn(async move {
+        let mut t = tokio::time::interval(Duration::from_secs(3600));
+        loop {
+            t.tick().await;
+            if let Err(e) = state.db.purge_expired_sessions().await {
+                tracing::warn!(error = ?e, "purging sessions");
+            }
+        }
+    });
+}
