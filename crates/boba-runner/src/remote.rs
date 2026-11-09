@@ -54,9 +54,9 @@ Options:
   --demo              Simulated runs, no Claude Code needed
   -h, --help          Show this help
 
-Claude Code auth: BOBA_CLAUDE_AUTH=subscription uses this machine's `claude auth login`
-(personal use: the server only routes your own work to it); the default expects
-ANTHROPIC_API_KEY (or Bedrock / Vertex).";
+Claude Code auth: with ANTHROPIC_API_KEY (or Bedrock / Vertex) set, the key is used;
+otherwise this machine's `claude auth login` (personal use: the server only routes your own
+work to it). Force one with BOBA_CLAUDE_AUTH=api_key|subscription.";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientArgs {
@@ -163,6 +163,13 @@ pub async fn main(args: Vec<String>) -> anyhow::Result<()> {
         (Arc::new(DemoRunner::new(cfg)), RunnerAuth::Demo, None)
     } else {
         let mut cfg = ClaudeConfig::from_env(id, data_dir.clone());
+        // A connected machine is usually someone's own laptop: without an API key (and no
+        // explicit BOBA_CLAUDE_AUTH), use its `claude auth login`.
+        if std::env::var_os("BOBA_CLAUDE_AUTH").is_none()
+            && !crate::claude::api_key_auth_available()
+        {
+            cfg.auth_mode = crate::AuthMode::Subscription;
+        }
         cfg.name = name.clone();
         cfg.max_concurrent_runs = args.max_runs.unwrap_or(2);
         let r = ClaudeCodeRunner::connect(cfg).await?;
@@ -191,13 +198,36 @@ pub async fn main(args: Vec<String>) -> anyhow::Result<()> {
     );
     let (stop_tx, stop_rx) = watch::channel(false);
     tokio::spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
+        shutdown_signal().await;
         tracing::info!("stopping: cancelling runs (Ctrl-C again to force)");
         let _ = stop_tx.send(true);
-        let _ = tokio::signal::ctrl_c().await;
+        shutdown_signal().await;
         std::process::exit(130);
     });
     client.run(stop_rx).await
+}
+
+/// Ctrl-C, or SIGTERM (what systemd / launchd send to stop a service).
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 fn persistent_id(path: &Path) -> anyhow::Result<Id> {
