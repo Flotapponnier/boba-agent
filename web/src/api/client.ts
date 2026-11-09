@@ -1,0 +1,94 @@
+import type {
+  Agent,
+  AssignAgent,
+  AuthStatus,
+  CreateAgent,
+  CreateRepo,
+  CreateTab,
+  CreateTicket,
+  HistoryEvent,
+  HistoryQuery,
+  InviteRequest,
+  InviteResponse,
+  LoginRequest,
+  MoveTicket,
+  PermissionAnswer,
+  Repo,
+  Run,
+  RunLogLine,
+  SetupRequest,
+  Skill,
+  SkillDetail,
+  Snapshot,
+  Tab,
+  Ticket,
+  UpdateAgent,
+  UpdateTab,
+  UpdateTicket,
+  UpsertSkill,
+  User,
+  Role,
+  WorkspaceSettings,
+} from './types';
+import { httpTransport, type Transport } from './transport';
+
+let transport: Transport = httpTransport;
+export const setTransport = (t: Transport) => {
+  transport = t;
+};
+export const getTransport = () => transport;
+
+const req = <T>(method: string, path: string, body?: unknown) => transport.request<T>(method, path, body);
+
+function qs(q: Partial<Record<string, string | number | null | undefined>>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) if (v !== null && v !== undefined && v !== '') p.set(k, String(v));
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
+/** Typed REST client, one function per endpoint of docs/API.md. */
+export const api = {
+  authStatus: () => req<AuthStatus>('GET', '/api/auth/status'),
+  setup: (b: SetupRequest) => req<User>('POST', '/api/auth/setup', b),
+  login: (b: LoginRequest) => req<User>('POST', '/api/auth/login', b),
+  logout: () => req<void>('POST', '/api/auth/logout'),
+  invite: (b: InviteRequest) => req<InviteResponse>('POST', '/api/users/invite', b),
+  acceptInvite: (token: string, password: string) => req<User>('POST', '/api/auth/accept-invite', { token, password }),
+  setRole: (id: string, role: Role) => req<User>('PATCH', `/api/users/${id}`, { role }),
+
+  snapshot: () => req<Snapshot>('GET', '/api/snapshot'),
+  history: (q: Partial<HistoryQuery>) => req<HistoryEvent[]>('GET', `/api/history${qs(q)}`),
+  updateSettings: (b: Partial<WorkspaceSettings>) => req<WorkspaceSettings>('PATCH', '/api/settings', b),
+
+  createTab: (b: CreateTab) => req<Tab>('POST', '/api/tabs', b),
+  updateTab: (id: string, b: Partial<UpdateTab>) => req<Tab>('PATCH', `/api/tabs/${id}`, b),
+  deleteTab: (id: string) => req<void>('DELETE', `/api/tabs/${id}`),
+
+  createAgent: (b: CreateAgent) => req<Agent>('POST', '/api/agents', b),
+  updateAgent: (id: string, b: Partial<UpdateAgent>) => req<Agent>('PATCH', `/api/agents/${id}`, b),
+  deleteAgent: (id: string) => req<void>('DELETE', `/api/agents/${id}`),
+
+  createTicket: (b: CreateTicket) => req<Ticket>('POST', '/api/tickets', b),
+  updateTicket: (id: string, b: Partial<UpdateTicket>) => req<Ticket>('PATCH', `/api/tickets/${id}`, b),
+  moveTicket: (id: string, b: MoveTicket) => req<Ticket>('POST', `/api/tickets/${id}/move`, b),
+  assign: (id: string, b: AssignAgent) => req<Run>('POST', `/api/tickets/${id}/assign`, b),
+  comment: (id: string, text: string) => req<HistoryEvent>('POST', `/api/tickets/${id}/comment`, { text }),
+  deleteTicket: (id: string) => req<void>('DELETE', `/api/tickets/${id}`),
+  ticketRuns: (id: string) => req<Run[]>('GET', `/api/tickets/${id}/runs`),
+
+  run: (id: string) => req<Run>('GET', `/api/runs/${id}`),
+  runLogs: (id: string, afterSeq?: number, limit = 500) =>
+    req<RunLogLine[]>('GET', `/api/runs/${id}/logs${qs({ after_seq: afterSeq, limit })}`),
+  cancelRun: (id: string) => req<Run>('POST', `/api/runs/${id}/cancel`),
+  messageRun: (id: string, text: string) => req<Run>('POST', `/api/runs/${id}/message`, { text }),
+  answerPermission: (id: string, b: PermissionAnswer) => req<void>('POST', `/api/runs/${id}/permission`, b),
+
+  skill: (id: string) => req<SkillDetail>('GET', `/api/skills/${id}`),
+  createSkill: (b: UpsertSkill) => req<Skill>('POST', '/api/skills', b),
+  updateSkill: (id: string, b: UpsertSkill) => req<Skill>('PUT', `/api/skills/${id}`, b),
+  rescanSkills: () => req<Skill[]>('POST', '/api/skills/rescan'),
+
+  createRepo: (b: CreateRepo) => req<Repo>('POST', '/api/repos', b),
+  deleteRepo: (id: string) => req<void>('DELETE', `/api/repos/${id}`),
+};
