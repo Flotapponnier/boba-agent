@@ -59,6 +59,13 @@ pub fn api() -> Router<SharedState> {
         .route("/repos", post(board::create_repo))
         .route("/repos/{id}", axum::routing::delete(board::delete_repo))
         .route("/health", get(|| async { "ok" }))
+        // remote runners
+        .route("/runners", post(crate::runners_api::create))
+        .route("/runners/ws", get(crate::runners_api::upgrade))
+        .route(
+            "/runners/{id}",
+            axum::routing::delete(crate::runners_api::delete),
+        )
         // team
         .route("/me", patch(team::update_me))
         .route("/notifications", get(team::list_notifications))

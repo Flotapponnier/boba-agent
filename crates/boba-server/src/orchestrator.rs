@@ -479,7 +479,7 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         .agent(run.agent_id)
         .await?
         .ok_or(AppError::NotFound("agent"))?;
-    let mcp_servers = crate::connectors::resolve_mcp_servers(db, &agent).await?;
+    let mcp_servers = connector_servers_for(state, run, &agent).await?;
     let tab = db
         .tab(ticket.tab_id)
         .await?
@@ -546,6 +546,54 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
     })
 }
 
+/// Decrypted connector secrets may only leave the server for a runner trusted with them:
+/// the built-in runner(s), a Shared remote runner (registered by an admin), or a personal
+/// runner whose owner may manage automations (and could read the connectors anyway).
+/// Otherwise the connectors are dropped from the run, and the transcript says so.
+async fn connector_servers_for(
+    state: &SharedState,
+    run: &Run,
+    agent: &Agent,
+) -> AppResult<Vec<boba_core::runner::McpServerSpec>> {
+    if agent.connector_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let slot = state
+        .runners
+        .by_id(run.runner_id)
+        .ok_or_else(|| AppError::conflict("the runner of this run is gone"))?;
+    let trusted = match &slot.remote {
+        None => true,
+        Some(_) if slot.scope == boba_core::team::RunnerScope::Shared => true,
+        Some(_) => match slot.owner_id {
+            Some(owner) => state
+                .db
+                .user(owner)
+                .await?
+                .is_some_and(|u| u.role.grants(Permission::ManageAutomations)),
+            None => false,
+        },
+    };
+    let servers = crate::connectors::resolve_mcp_servers(&state.db, agent).await?;
+    if trusted {
+        return Ok(servers);
+    }
+    for s in &servers {
+        state
+            .server_log(
+                run.id,
+                LogKind::System,
+                format!(
+                    "Connector {} is not available on personal runners (its secrets stay on the server).",
+                    s.name
+                ),
+                Some(json!({ "connector_withheld": s.name })),
+            )
+            .await;
+    }
+    Ok(Vec::new())
+}
+
 /// Hand every not-yet-dispatched queued run to the runner (oldest first).
 pub async fn dispatch_queued_locked(state: &SharedState) {
     let queued = match state.db.active_runs().await {
@@ -591,7 +639,7 @@ async fn dispatch_locked(state: &SharedState, run: Run) {
     let s2 = state.clone();
     let run_id = run.id;
     tokio::spawn(consume_boxed(s2, run_id, rx));
-    let Some(runner) = state.runner_of(&run).cloned() else {
+    let Some(runner) = state.runner_of(&run) else {
         fail_now_locked(state, run_id, "no runner available".into()).await;
         return;
     };

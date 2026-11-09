@@ -12,8 +12,10 @@ pub mod error;
 pub mod hub;
 pub mod notify;
 pub mod orchestrator;
+pub mod remote;
 pub mod router;
 pub mod routes;
+pub mod runners_api;
 pub mod seed;
 pub mod skills;
 pub mod speech;
@@ -38,6 +40,7 @@ pub async fn build(
     runners: impl Into<router::Runners>,
 ) -> anyhow::Result<(SharedState, Router)> {
     let state = AppState::new(cfg, runners.into()).await?;
+    runners_api::load(&state).await?;
     if let Err(e) = skills::rescan(&state).await {
         tracing::warn!(error = ?e, "initial skill scan failed");
     }
@@ -90,7 +93,7 @@ pub async fn shutdown_runs(state: &SharedState, grace: Duration) {
     for id in &live {
         let runner = match state.db.run(*id).await {
             Ok(Some(run)) => match state.runner_of(&run) {
-                Some(r) => r.clone(),
+                Some(r) => r,
                 None => continue,
             },
             _ => continue,

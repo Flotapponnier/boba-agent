@@ -1634,4 +1634,132 @@ impl Db {
         .await?;
         Ok(())
     }
+
+    // ------------------------------------------------------------ remote runners
+
+    fn remote_row(row: &SqliteRow) -> anyhow::Result<RemoteRunnerRow> {
+        Ok(RemoteRunnerRow {
+            id: id(row, "id")?,
+            name: row.try_get("name")?,
+            scope: dec(&row.try_get::<String, _>("scope")?)?,
+            owner_user_id: opt_id(row, "owner_user_id")?,
+            auth: dec(&row.try_get::<String, _>("auth")?)
+                .unwrap_or(boba_core::team::RunnerAuth::Unknown),
+            host: row.try_get("host")?,
+            claude_version: row.try_get("claude_version")?,
+            max_concurrent_runs: row.try_get::<i64, _>("max_concurrent_runs")? as u32,
+            last_seen_at: opt_time(row, "last_seen_at")?,
+        })
+    }
+
+    pub async fn insert_remote_runner(
+        &self,
+        r: &RemoteRunnerRow,
+        token_hash: &str,
+        created_by: Id,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO runners(id, name, max_concurrent_runs, last_seen_at, token_hash, scope,
+               owner_user_id, auth, created_by, created_at) VALUES(?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(r.id.to_string())
+        .bind(&r.name)
+        .bind(r.max_concurrent_runs as i64)
+        .bind(token_hash)
+        .bind(enc(&r.scope))
+        .bind(s(r.owner_user_id))
+        .bind(enc(&r.auth))
+        .bind(created_by.to_string())
+        .bind(ts(Utc::now()))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn remote_runners(&self) -> anyhow::Result<Vec<RemoteRunnerRow>> {
+        sqlx::query("SELECT * FROM runners WHERE token_hash IS NOT NULL ORDER BY created_at")
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .map(Self::remote_row)
+            .collect()
+    }
+
+    pub async fn remote_runner(&self, rid: Id) -> anyhow::Result<Option<RemoteRunnerRow>> {
+        sqlx::query("SELECT * FROM runners WHERE id = ? AND token_hash IS NOT NULL")
+            .bind(rid.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .as_ref()
+            .map(Self::remote_row)
+            .transpose()
+    }
+
+    pub async fn remote_runner_by_token(
+        &self,
+        token_hash: &str,
+    ) -> anyhow::Result<Option<RemoteRunnerRow>> {
+        sqlx::query("SELECT * FROM runners WHERE token_hash = ?")
+            .bind(token_hash)
+            .fetch_optional(&self.pool)
+            .await?
+            .as_ref()
+            .map(Self::remote_row)
+            .transpose()
+    }
+
+    /// What the runner reported in Hello.
+    pub async fn update_remote_hello(
+        &self,
+        rid: Id,
+        auth: boba_core::team::RunnerAuth,
+        host: &str,
+        claude_version: Option<&str>,
+        max_concurrent_runs: u32,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE runners SET auth = ?, host = ?, claude_version = ?, max_concurrent_runs = ?,
+               last_seen_at = ? WHERE id = ?",
+        )
+        .bind(enc(&auth))
+        .bind(host)
+        .bind(claude_version)
+        .bind(max_concurrent_runs as i64)
+        .bind(ts(Utc::now()))
+        .bind(rid.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn touch_remote_runner(&self, rid: Id) -> anyhow::Result<()> {
+        sqlx::query("UPDATE runners SET last_seen_at = ? WHERE id = ?")
+            .bind(ts(Utc::now()))
+            .bind(rid.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete_remote_runner(&self, rid: Id) -> anyhow::Result<bool> {
+        let r = sqlx::query("DELETE FROM runners WHERE id = ? AND token_hash IS NOT NULL")
+            .bind(rid.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+}
+
+/// A registered remote runner (the token is only stored hashed).
+#[derive(Debug, Clone)]
+pub struct RemoteRunnerRow {
+    pub id: Id,
+    pub name: String,
+    pub scope: boba_core::team::RunnerScope,
+    pub owner_user_id: Option<Id>,
+    pub auth: boba_core::team::RunnerAuth,
+    pub host: Option<String>,
+    pub claude_version: Option<String>,
+    pub max_concurrent_runs: u32,
+    pub last_seen_at: Option<DateTime<Utc>>,
 }

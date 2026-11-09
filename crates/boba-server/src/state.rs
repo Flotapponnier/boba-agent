@@ -25,6 +25,8 @@ pub struct AppState {
     pub db: Db,
     pub hub: Hub,
     pub runners: crate::router::Runners,
+    /// Remote runners by id (the slot table holds them too, while registered).
+    pub remotes: StdMutex<HashMap<Id, Arc<crate::remote::RemoteRunner>>>,
     /// Serialises orchestration state transitions (assign, finish, review routing).
     pub orch_lock: Mutex<()>,
     /// Runs handed to the runner and not finished yet.
@@ -85,6 +87,7 @@ impl AppState {
             db,
             hub: Hub::new(),
             runners,
+            remotes: StdMutex::new(HashMap::new()),
             orch_lock: Mutex::new(()),
             live: StdMutex::new(HashSet::new()),
             seqs: StdMutex::new(HashMap::new()),
@@ -258,8 +261,8 @@ impl AppState {
     }
 
     /// The runner a run was routed to.
-    pub fn runner_of(&self, run: &Run) -> Option<&Arc<dyn Runner>> {
-        self.runners.by_id(run.runner_id).map(|s| &s.runner)
+    pub fn runner_of(&self, run: &Run) -> Option<Arc<dyn Runner>> {
+        self.runners.by_id(run.runner_id).map(|s| s.runner.clone())
     }
 
     /// Full board state. Taken under the orchestrator lock so it never shows a half-applied

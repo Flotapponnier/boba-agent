@@ -1914,3 +1914,424 @@ async fn personal_runner_is_never_a_fallback_for_others() {
     assert!(snap.runs.is_empty());
     assert!(all_idle(&snap));
 }
+
+// ---------------------------------------------------------------- remote runners
+
+type RunnerWs =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn runner_connect(
+    srv: &Srv,
+    token: &str,
+) -> Result<RunnerWs, Box<tokio_tungstenite::tungstenite::Error>> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let url = srv.base.replace("http://", "ws://") + "/runners/ws";
+    let mut req = url.as_str().into_client_request().unwrap();
+    req.headers_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    tokio_tungstenite::connect_async(req)
+        .await
+        .map(|(ws, _)| ws)
+        .map_err(Box::new)
+}
+
+async fn runner_send(ws: &mut RunnerWs, v: Value) {
+    use futures::SinkExt;
+    ws.send(tokio_tungstenite::tungstenite::Message::Text(
+        v.to_string().into(),
+    ))
+    .await
+    .unwrap();
+}
+
+/// Next server -> runner JSON frame (None if the socket closed).
+async fn runner_recv(ws: &mut RunnerWs) -> Option<Value> {
+    use tokio_tungstenite::tungstenite::Message;
+    loop {
+        match tokio::time::timeout(Duration::from_secs(10), ws.next())
+            .await
+            .expect("runner ws timeout")
+        {
+            Some(Ok(Message::Text(t))) => return Some(serde_json::from_str(t.as_str()).unwrap()),
+            Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return None,
+            _ => continue,
+        }
+    }
+}
+
+fn hello(auth: &str) -> Value {
+    json!({"type": "hello", "name": "mbp", "max_concurrent_runs": 2, "version": "0.1.0",
+           "auth": auth, "host": "mia-mbp", "claude_version": "2.1.0"})
+}
+
+/// Play a run to completion from the runner side.
+async fn runner_finish(ws: &mut RunnerWs, run_id: &Value, verdict: Option<&str>) {
+    runner_send(
+        ws,
+        json!({"type": "update", "run_id": run_id, "update":
+        {"type": "started", "worktree_path": "/w", "branch": "boba/x", "session_id": "s1"}}),
+    )
+    .await;
+    runner_send(ws, json!({"type": "update", "run_id": run_id, "update": {"type": "log", "line":
+        {"run_id": run_id, "seq": 0, "ts": chrono::Utc::now(), "kind": "text", "text": "hi from the remote", "data": null}}})).await;
+    runner_send(ws, json!({"type": "update", "run_id": run_id, "update": {"type": "finished", "outcome":
+        {"status": "succeeded", "summary": "remote done", "verdict": verdict, "feedback": "ok", "error": null, "plan": null}}})).await;
+}
+
+#[tokio::test]
+async fn remote_personal_runner_end_to_end() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let member_id = snap
+        .users
+        .iter()
+        .find(|u| u.email == "m@test.io")
+        .unwrap()
+        .id;
+
+    // Register (personal, by the member) -> one-time token + command.
+    let (s, v) = srv
+        .post(
+            &member,
+            "/runners",
+            json!({"name": "mbp", "scope": "personal"}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let token = v["token"].as_str().unwrap().to_string();
+    assert!(v["command"].as_str().unwrap().contains(&token));
+    let runner_id: Id = serde_json::from_value(v["runner"]["id"].clone()).unwrap();
+    assert_eq!(
+        (
+            v["runner"]["online"].clone(),
+            v["runner"]["owner_user_id"].clone()
+        ),
+        (json!(false), json!(member_id))
+    );
+    // Viewers cannot register; members cannot register shared runners.
+    assert_eq!(
+        srv.post(&member, "/runners", json!({"name": "x", "scope": "shared"}))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert!(
+        runner_connect(&srv, "nope").await.is_err(),
+        "bad token must be refused"
+    );
+
+    // Connect: Hello with a subscription is fine for a personal runner.
+    let mut ws = runner_connect(&srv, &token).await.unwrap();
+    runner_send(&mut ws, hello("subscription")).await;
+    let snap = srv
+        .until(&owner, "online", |s| {
+            s.runners.iter().any(|r| r.id == runner_id && r.online)
+        })
+        .await;
+    let card = snap.runners.iter().find(|r| r.id == runner_id).unwrap();
+    assert_eq!(boba_server::db::enc(&card.auth), "subscription");
+    assert_eq!(card.host.as_deref(), Some("mia-mbp"));
+
+    // Real runs need a repository (remote runners clone it from remote_url).
+    let (_, repo) = srv
+        .post(
+            &owner,
+            "/repos",
+            json!({"name": "app", "path": "/srv/app", "remote_url": "https://github.com/acme/app"}),
+        )
+        .await;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/tabs/{}", snap.tabs[0].id),
+        Some(json!({"repo_id": repo["id"]})),
+    )
+    .await;
+    // The member's work goes to their machine; the owner's does not.
+    let t = snap.tickets[0].id;
+    let t_owner = snap.tickets[1].id;
+    let qa = agent(&snap, "Golden QA").id;
+    let dev = agent(&snap, "Boba Dev").id;
+    let (s, run) = srv
+        .post(
+            &member,
+            &format!("/tickets/{t}/assign"),
+            json!({"agent_id": qa}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{run}");
+    assert_eq!(run["runner_id"], json!(runner_id));
+    let start_msg = runner_recv(&mut ws).await.unwrap();
+    assert_eq!(start_msg["type"], "start");
+    assert_eq!(start_msg["spec"]["run_id"], run["id"]);
+    srv.post(
+        &owner,
+        &format!("/tickets/{t_owner}/assign"),
+        json!({"agent_id": dev}),
+    )
+    .await;
+    assert!(srv
+        .runner
+        .specs()
+        .iter()
+        .any(|s| s.ticket.as_ref().unwrap().id == t_owner));
+
+    // The remote plays the work run; the auto review (member is responsible) comes back to it.
+    runner_finish(&mut ws, &run["id"], None).await;
+    let review = runner_recv(&mut ws).await.unwrap();
+    assert_eq!(
+        (review["type"].clone(), review["spec"]["kind"].clone()),
+        (json!("start"), json!("review"))
+    );
+    runner_finish(&mut ws, &review["spec"]["run_id"], Some("approved")).await;
+    srv.until(&owner, "approved", |s| {
+        column_kind(s, ticket(s, t)) == ColumnKind::Done && all_idle(s)
+    })
+    .await;
+    let (_, logs) = srv
+        .get(
+            &member,
+            &format!("/runs/{}/logs", run["id"].as_str().unwrap()),
+        )
+        .await;
+    assert!(logs
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|l| l["text"] == "hi from the remote"));
+
+    // Disconnect mid-run: the run survives the drop...
+    let t2 = snap.tickets[2].id;
+    let (_, run2) = srv
+        .post(
+            &member,
+            &format!("/tickets/{t2}/assign"),
+            json!({"agent_id": qa}),
+        )
+        .await;
+    let start2 = runner_recv(&mut ws).await.unwrap();
+    assert_eq!(start2["spec"]["run_id"], run2["id"]);
+    runner_send(
+        &mut ws,
+        json!({"type": "update", "run_id": run2["id"], "update":
+        {"type": "started", "worktree_path": "/w", "branch": "b", "session_id": null}}),
+    )
+    .await;
+    srv.until(&member, "running", |s| {
+        s.runs
+            .iter()
+            .any(|r| json!(r.id) == run2["id"] && r.status == RunStatus::Running)
+    })
+    .await;
+    drop(ws);
+    srv.until(&owner, "offline", |s| {
+        s.runners.iter().any(|r| r.id == runner_id && !r.online)
+    })
+    .await;
+    let s_now = srv.snapshot(&owner).await;
+    assert!(
+        s_now
+            .runs
+            .iter()
+            .any(|r| json!(r.id) == run2["id"] && r.status == RunStatus::Running),
+        "failed too early"
+    );
+    // ...and reconnecting without that run in Resume means it was lost -> failed.
+    let mut ws = runner_connect(&srv, &token).await.unwrap();
+    runner_send(&mut ws, hello("subscription")).await;
+    runner_send(&mut ws, json!({"type": "resume", "run_ids": []})).await;
+    let snap = srv
+        .until(&member, "lost run failed", |s| {
+            s.runs
+                .iter()
+                .any(|r| json!(r.id) == run2["id"] && r.status == RunStatus::Failed)
+        })
+        .await;
+    let lost = snap
+        .runs
+        .iter()
+        .find(|r| json!(r.id) == run2["id"])
+        .unwrap();
+    assert!(
+        lost.error.as_deref().unwrap().contains("lost"),
+        "{:?}",
+        lost.error
+    );
+
+    // Removing the runner closes its socket and drops it from the board.
+    assert_eq!(
+        srv.req(&owner, "DELETE", &format!("/runners/{runner_id}"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert!(
+        runner_recv(&mut ws).await.is_none(),
+        "socket stays open after removal"
+    );
+    assert!(!srv
+        .snapshot(&owner)
+        .await
+        .runners
+        .iter()
+        .any(|r| r.id == runner_id));
+    let (_, h) = srv.get(&owner, "/history?limit=50").await;
+    let kinds: Vec<&str> = h
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"runner_connected") && kinds.contains(&"runner_disconnected"),
+        "{kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn shared_runner_with_a_subscription_is_refused() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let (s, v) = srv
+        .post(
+            &owner,
+            "/runners",
+            json!({"name": "vps", "scope": "shared"}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let token = v["token"].as_str().unwrap();
+    let runner_id: Id = serde_json::from_value(v["runner"]["id"].clone()).unwrap();
+    let mut ws = runner_connect(&srv, token).await.unwrap();
+    runner_send(&mut ws, hello("subscription")).await;
+    assert!(runner_recv(&mut ws).await.is_none(), "must be closed");
+    assert!(!srv
+        .snapshot(&owner)
+        .await
+        .runners
+        .iter()
+        .any(|r| r.id == runner_id && r.online));
+    // With an API key it is accepted.
+    let mut ws = runner_connect(&srv, token).await.unwrap();
+    runner_send(&mut ws, hello("api_key")).await;
+    srv.until(&owner, "online", |s| {
+        s.runners.iter().any(|r| r.id == runner_id && r.online)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn connector_secrets_never_reach_a_members_personal_runner() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let (s, conn) = srv
+        .post(
+            &owner,
+            "/connectors",
+            json!({"name": "sentry", "kind": "sentry",
+            "transport": {"type": "stdio", "command": "npx", "args": ["sentry-mcp"]},
+            "secrets": {"SENTRY_TOKEN": "s3cr3t-token-value"}}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{conn}");
+    let qa = agent(&snap, "Golden QA").id;
+    let dev = agent(&snap, "Boba Dev").id;
+    for a in [qa, dev] {
+        let (s, v) = srv
+            .req(
+                &owner,
+                "PATCH",
+                &format!("/agents/{a}"),
+                Some(json!({"connector_ids": [conn["id"]]})),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+    }
+    let (_, repo) = srv
+        .post(
+            &owner,
+            "/repos",
+            json!({"name": "app", "path": "/srv/app", "remote_url": "https://github.com/acme/app"}),
+        )
+        .await;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/tabs/{}", snap.tabs[0].id),
+        Some(json!({"repo_id": repo["id"]})),
+    )
+    .await;
+
+    // The member's own machine: the run starts, without the connector.
+    let (_, v) = srv
+        .post(
+            &member,
+            "/runners",
+            json!({"name": "mbp", "scope": "personal"}),
+        )
+        .await;
+    let mut ws = runner_connect(&srv, v["token"].as_str().unwrap())
+        .await
+        .unwrap();
+    runner_send(&mut ws, hello("subscription")).await;
+    let rid = v["runner"]["id"].clone();
+    srv.until(&owner, "online", |s| {
+        s.runners.iter().any(|r| json!(r.id) == rid && r.online)
+    })
+    .await;
+    let t = snap.tickets[0].id;
+    let (_, run) = srv
+        .post(
+            &member,
+            &format!("/tickets/{t}/assign"),
+            json!({"agent_id": qa}),
+        )
+        .await;
+    let start = runner_recv(&mut ws).await.unwrap();
+    assert_eq!(start["spec"]["mcp_servers"], json!([]));
+    assert!(
+        !start.to_string().contains("s3cr3t"),
+        "secret leaked to a personal runner"
+    );
+    let (_, logs) = srv
+        .get(
+            &member,
+            &format!("/runs/{}/logs", run["id"].as_str().unwrap()),
+        )
+        .await;
+    assert!(logs.as_array().unwrap().iter().any(|l| l["text"]
+        .as_str()
+        .unwrap()
+        .contains("Connector sentry is not available")));
+
+    // The built-in runner (server side) still gets it.
+    let t2 = snap.tickets[1].id;
+    srv.post(
+        &owner,
+        &format!("/tickets/{t2}/assign"),
+        json!({"agent_id": dev}),
+    )
+    .await;
+    srv.until(&owner, "dev ran", |s| {
+        s.runs.iter().any(|r| r.ticket_id == Some(t2))
+    })
+    .await;
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.ticket.as_ref().is_some_and(|x| x.id == t2))
+        .unwrap();
+    assert_eq!(spec.mcp_servers.len(), 1);
+    assert_eq!(
+        spec.mcp_servers[0]
+            .secrets
+            .get("SENTRY_TOKEN")
+            .map(String::as_str),
+        Some("s3cr3t-token-value")
+    );
+}
