@@ -591,7 +591,7 @@ async fn dispatch_locked(state: &SharedState, run: Run) {
     let s2 = state.clone();
     let run_id = run.id;
     tokio::spawn(consume_boxed(s2, run_id, rx));
-    let Some(runner) = state.runner_of(&run).cloned() else {
+    let Some(runner) = state.runner_of(&run) else {
         fail_now_locked(state, run_id, "no runner available".into()).await;
         return;
     };
