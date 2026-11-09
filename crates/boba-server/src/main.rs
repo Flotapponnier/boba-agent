@@ -20,6 +20,11 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    // `boba-agent runner …`: connect this machine to a server as a remote runner.
+    if std::env::args().nth(1).as_deref() == Some("runner") {
+        return boba_runner::remote::main(std::env::args().skip(2).collect()).await;
+    }
+
     let mut cfg = Config::from_env();
     std::fs::create_dir_all(&cfg.data_dir)
         .with_context(|| format!("creating {}", cfg.data_dir.display()))?;

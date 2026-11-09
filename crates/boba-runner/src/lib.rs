@@ -18,6 +18,7 @@ pub mod demo;
 pub mod emit;
 pub mod git;
 pub mod process;
+pub mod remote;
 pub mod skills;
 pub mod table;
 pub mod util;
