@@ -50,6 +50,47 @@ fn status_for(kind: RunKind) -> AgentStatus {
     match kind {
         RunKind::Work => AgentStatus::Working,
         RunKind::Review => AgentStatus::Reviewing,
+        RunKind::Job | RunKind::Command => AgentStatus::Working,
+    }
+}
+
+/// Tools a read-only run (review, command) may use, whatever the agent is configured with.
+pub const READ_ONLY_TOOLS: &[&str] = &[
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash(git diff:*)",
+    "Bash(git log:*)",
+    "Bash(git show:*)",
+    "Bash(gh pr diff:*)",
+    "Bash(gh pr view:*)",
+];
+
+/// The read-only allowlist plus the agent's MCP tools whose name says they only read.
+pub fn read_only_tools(agent_tools: &[String]) -> Vec<String> {
+    const READ_VERBS: &[&str] = &[
+        "get", "list", "search", "read", "view", "fetch", "find", "query",
+    ];
+    let mut out: Vec<String> = READ_ONLY_TOOLS.iter().map(|s| s.to_string()).collect();
+    for t in agent_tools {
+        let Some(rest) = t.strip_prefix("mcp__") else {
+            continue;
+        };
+        let tool = rest.rsplit("__").next().unwrap_or("").to_ascii_lowercase();
+        let reads = READ_VERBS
+            .iter()
+            .any(|v| tool == *v || tool.starts_with(&format!("{v}_")) || tool.starts_with(v));
+        if reads && !t.contains('*') && !out.contains(t) {
+            out.push(t.clone());
+        }
+    }
+    out
+}
+
+async fn run_ticket(db: &crate::db::Db, run: &Run) -> anyhow::Result<Option<Ticket>> {
+    match run.ticket_id {
+        Some(id) => db.ticket(id).await,
+        None => Ok(None),
     }
 }
 
@@ -225,7 +266,8 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
     };
     let run = Run {
         id: new_id(),
-        ticket_id: ticket.id,
+        ticket_id: Some(ticket.id),
+        job_id: None,
         agent_id: agent.id,
         kind,
         status: RunStatus::Queued,
@@ -267,7 +309,7 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
         Trigger::Auto => Actor::Agent(agent.id),
     };
     let message = match (kind, req.trigger) {
-        (RunKind::Work, _) => format!(
+        (RunKind::Work | RunKind::Job | RunKind::Command, _) => format!(
             "{} started working on {}: {}",
             agent.name,
             tref(&ticket),
@@ -312,23 +354,24 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
     Ok(db.run(run.id).await?.unwrap_or(run))
 }
 
-async fn resolve_repo(state: &SharedState, ticket: &Ticket, tab: &Tab) -> AppResult<RepoSpec> {
+/// The repo a ticket run works in. `None` only in demo mode (simulated runs need no checkout).
+async fn resolve_repo(
+    state: &SharedState,
+    ticket: &Ticket,
+    tab: &Tab,
+) -> AppResult<Option<RepoSpec>> {
     let repo_id = ticket.repo_id.or(tab.repo_id);
     let repo = match repo_id {
         Some(id) => state.db.repo(id).await?,
         None => None,
     };
     match repo {
-        Some(r) => Ok(RepoSpec {
+        Some(r) => Ok(Some(RepoSpec {
             path: r.path,
             default_branch: r.default_branch,
             remote_url: r.remote_url,
-        }),
-        None if state.cfg.demo_mode => Ok(RepoSpec {
-            path: String::new(),
-            default_branch: "main".into(),
-            remote_url: None,
-        }),
+        })),
+        None if state.cfg.demo_mode => Ok(None),
         None => Err(AppError::bad(format!(
             "{} has no repository: pick one on the ticket or on the \"{}\" tab",
             tref(ticket),
@@ -339,10 +382,9 @@ async fn resolve_repo(state: &SharedState, ticket: &Ticket, tab: &Tab) -> AppRes
 
 async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
     let db = &state.db;
-    let ticket = db
-        .ticket(run.ticket_id)
+    let ticket = run_ticket(db, run)
         .await?
-        .ok_or(AppError::NotFound("ticket"))?;
+        .ok_or_else(|| AppError::bad("this run has no ticket"))?;
     let agent = db
         .agent(run.agent_id)
         .await?
@@ -359,10 +401,13 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         .filter_map(|id| skills.iter().find(|s| s.id == *id).map(|s| s.path.clone()))
         .collect();
     let (extra, resume) = db.run_inputs(run.id).await?;
-    let permission_mode = match run.kind {
-        // Reviews are read-only, whatever the agent's configured mode.
-        RunKind::Review => PermissionMode::Plan,
-        RunKind::Work => agent.permission_mode,
+    // Reviews and commands are read-only, whatever the agent is configured with:
+    // plan mode and a server-enforced read-only tool allowlist.
+    let read_only = matches!(run.kind, RunKind::Review | RunKind::Command);
+    let (permission_mode, allowed_tools) = if read_only {
+        (PermissionMode::Plan, read_only_tools(&agent.allowed_tools))
+    } else {
+        (agent.permission_mode, agent.allowed_tools.clone())
     };
     Ok(RunSpec {
         run_id: run.id,
@@ -374,10 +419,10 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
             system_prompt: agent.system_prompt,
             model: agent.model,
             permission_mode,
-            allowed_tools: agent.allowed_tools,
+            allowed_tools,
             max_turns: agent.max_turns,
         },
-        ticket: TicketSpec {
+        ticket: Some(TicketSpec {
             id: ticket.id,
             number: ticket.number,
             title: ticket.title,
@@ -388,8 +433,14 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
             pr_url: ticket.pr_url,
             review_feedback: ticket.review_feedback,
             review_rounds: ticket.review_rounds,
-        },
+            source: ticket.source.clone(),
+        }),
+        job: None,
+        command: None,
         repo,
+        // Connectors and board tools are wired in follow-up PRs.
+        mcp_servers: Vec::new(),
+        board_tools: None,
         skill_paths,
         resume_session_id: resume,
         extra_instructions: extra,
@@ -454,6 +505,7 @@ async fn fail_now_locked(state: &SharedState, run_id: Id, error: String) {
         verdict: None,
         feedback: None,
         error: Some(error),
+        plan: None,
     };
     if let Err(e) = finish_locked(state, run_id, outcome).await {
         tracing::error!(error = ?e, %run_id, "finishing failed run");
@@ -571,12 +623,13 @@ async fn on_event_locked(state: &SharedState, run_id: Id, upd: RunUpdate) -> any
                 run.session_id = session_id;
             }
             run.activity = Some(match run.kind {
-                RunKind::Work => "Getting started".into(),
                 RunKind::Review => "Reading the diff".into(),
+                RunKind::Command => "Thinking".into(),
+                RunKind::Work | RunKind::Job => "Getting started".into(),
             });
             save_run(state, &run).await?;
             if run.kind == RunKind::Work && !branch.is_empty() {
-                if let Some(mut t) = db.ticket(run.ticket_id).await? {
+                if let Some(mut t) = run_ticket(db, &run).await? {
                     if t.branch.as_deref() != Some(branch.as_str()) {
                         t.branch = Some(branch.clone());
                         t.updated_at = Utc::now();
@@ -597,7 +650,7 @@ async fn on_event_locked(state: &SharedState, run_id: Id, upd: RunUpdate) -> any
             if let Some(mut a) = db.agent(run.agent_id).await? {
                 a.status = AgentStatus::Waiting;
                 save_agent(state, &a).await?;
-                let refs = match db.ticket(run.ticket_id).await? {
+                let refs = match run_ticket(db, &run).await? {
                     Some(t) => Refs::ticket(&t),
                     None => Refs::default(),
                 }
@@ -623,7 +676,7 @@ async fn on_event_locked(state: &SharedState, run_id: Id, upd: RunUpdate) -> any
                 .await;
         }
         RunUpdate::PrOpened { number, url } => {
-            if let Some(mut t) = db.ticket(run.ticket_id).await? {
+            if let Some(mut t) = run_ticket(db, &run).await? {
                 let new_pr = t.pr_number != Some(number);
                 t.pr_number = Some(number);
                 t.pr_url = Some(url.clone());
@@ -677,6 +730,16 @@ pub async fn finish_locked(
     state: &SharedState,
     run_id: Id,
     outcome: RunOutcome,
+) -> anyhow::Result<()> {
+    finish_inner(state, run_id, outcome, true).await
+}
+
+/// `follow_up = false` (restart recovery) records the outcome but starts nothing new.
+async fn finish_inner(
+    state: &SharedState,
+    run_id: Id,
+    outcome: RunOutcome,
+    follow_up: bool,
 ) -> anyhow::Result<()> {
     let db = &state.db;
     let Some(mut run) = db.run(run_id).await? else {
@@ -746,12 +809,12 @@ pub async fn finish_locked(
         }
     }
 
-    let ticket = db.ticket(run.ticket_id).await?;
+    let ticket = run_ticket(db, &run).await?;
     let tab = match &ticket {
         Some(t) => db.tab(t.tab_id).await?,
         None => None,
     };
-    let mut entered_review = false;
+    let mut landed_in: Option<Id> = None;
     if let (Some(mut ticket), Some(tab), Some(a)) = (ticket, tab, agent.as_mut()) {
         let refs = Refs::ticket(&ticket).agent(a.id).run(run.id);
         match (run.kind, status) {
@@ -774,7 +837,6 @@ pub async fn finish_locked(
                 if let Some(col) =
                     first_of(&tab, ColumnKind::Review).or_else(|| first_of(&tab, ColumnKind::Done))
                 {
-                    entered_review = col.kind == ColumnKind::Review;
                     place(state, &mut ticket, col).await?;
                 }
                 save_ticket(state, &ticket).await?;
@@ -958,13 +1020,20 @@ pub async fn finish_locked(
                 }
             }
         }
-        if entered_review {
-            maybe_auto_review_locked(state, ticket.id).await;
-        }
+        // Wherever the ticket landed (work done -> PR column, approve/changes routing into
+        // another review column, a failed review left in place for one retry), its
+        // column's auto reviewer may pick it up.
+        landed_in = Some(ticket.id);
     } else if let Some(a) = agent.as_ref() {
         save_agent(state, a).await?;
     }
 
+    if !follow_up {
+        return Ok(());
+    }
+    if let Some(tid) = landed_in {
+        maybe_auto_review_locked(state, tid).await;
+    }
     // The agent is free again: it may have reviews waiting; a runner slot is free too.
     if let Some(a) = agent {
         drain_review_queue_locked(state, a.id).await;
@@ -1118,6 +1187,7 @@ fn cancelled_outcome() -> RunOutcome {
         verdict: None,
         feedback: None,
         error: Some("cancelled".into()),
+        plan: None,
     }
 }
 
@@ -1151,10 +1221,15 @@ pub async fn message(state: &SharedState, run_id: Id, text: String, by: Id) -> A
     if !run.status.is_terminal() {
         return Err(AppError::conflict("this run has not started yet"));
     }
+    let Some(ticket_id) = run.ticket_id else {
+        return Err(AppError::bad(
+            "follow-up messages are only supported on ticket runs",
+        ));
+    };
     assign(
         state,
         NewRun {
-            ticket_id: run.ticket_id,
+            ticket_id,
             agent_id: run.agent_id,
             kind: Some(run.kind),
             instructions: Some(text),
@@ -1224,12 +1299,14 @@ pub async fn abort_ticket_runs_locked(state: &SharedState, ticket_id: Id) -> any
     Ok(())
 }
 
-/// Startup: nothing survives a restart. Runs → Failed, agents → Idle, then queues resume.
+/// Startup: nothing survives a restart. Every non-terminal run is failed first, with no
+/// dispatching or auto review in between (so nothing is started and then marked failed),
+/// agents go Idle, and only then do the review queues resume once.
 pub async fn recover(state: &SharedState) -> anyhow::Result<()> {
     let _g = state.orch_lock.lock().await;
     for run in state.db.active_runs().await? {
         tracing::info!(run_id = %run.id, "failing run interrupted by restart");
-        finish_locked(
+        finish_inner(
             state,
             run.id,
             RunOutcome {
@@ -1238,7 +1315,9 @@ pub async fn recover(state: &SharedState) -> anyhow::Result<()> {
                 verdict: None,
                 feedback: None,
                 error: Some("server restarted".into()),
+                plan: None,
             },
+            false,
         )
         .await?;
     }
@@ -1277,9 +1356,40 @@ mod tests {
             prs_approved: 0,
             status: AgentStatus::Idle,
             current_run_id: None,
+            connector_ids: vec![],
+            board_tools: false,
             created_by: None,
             created_at: Utc::now(),
         }
+    }
+
+    #[test]
+    fn read_only_runs_never_get_write_tools() {
+        let agent_tools: Vec<String> = [
+            "Bash(*)",
+            "Write",
+            "Edit",
+            "mcp__linear__get_issue",
+            "mcp__linear__create_issue",
+            "mcp__gsc__search_analytics",
+            "mcp__x__*",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let got = read_only_tools(&agent_tools);
+        for bad in [
+            "Bash(*)",
+            "Write",
+            "Edit",
+            "mcp__linear__create_issue",
+            "mcp__x__*",
+        ] {
+            assert!(!got.iter().any(|t| t == bad), "{bad} leaked");
+        }
+        assert!(got.iter().any(|t| t == "mcp__linear__get_issue"));
+        assert!(got.iter().any(|t| t == "mcp__gsc__search_analytics"));
+        assert!(got.iter().any(|t| t == "Bash(gh pr diff:*)"));
     }
 
     #[test]

@@ -26,6 +26,8 @@ struct Presence {
 
 pub struct Hub {
     tx: broadcast::Sender<ServerMessage>,
+    /// Hashes of sessions that were logged out: their sockets close.
+    revoked: broadcast::Sender<String>,
     runs: Mutex<HashMap<Id, RunChannel>>,
     presence: Mutex<HashMap<ConnId, Presence>>,
     next_conn: std::sync::atomic::AtomicU64,
@@ -40,8 +42,10 @@ impl Default for Hub {
 impl Hub {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(1024);
+        let (revoked, _) = broadcast::channel(64);
         Self {
             tx,
+            revoked,
             runs: Mutex::new(HashMap::new()),
             presence: Mutex::new(HashMap::new()),
             next_conn: std::sync::atomic::AtomicU64::new(1),
@@ -50,6 +54,14 @@ impl Hub {
 
     pub fn subscribe(&self) -> broadcast::Receiver<ServerMessage> {
         self.tx.subscribe()
+    }
+
+    pub fn revoke_session(&self, token_hash: &str) {
+        let _ = self.revoked.send(token_hash.to_string());
+    }
+
+    pub fn revocations(&self) -> broadcast::Receiver<String> {
+        self.revoked.subscribe()
     }
 
     /// Send to every connected socket. No receivers is fine.

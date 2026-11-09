@@ -275,6 +275,8 @@ pub async fn seed_demo(state: &SharedState, owner: Id) -> anyhow::Result<()> {
             prs_approved: 0,
             status: AgentStatus::Idle,
             current_run_id: None,
+            connector_ids: Vec::new(),
+            board_tools: false,
             created_by: Some(owner),
             created_at: now,
         };
@@ -330,6 +332,7 @@ pub async fn seed_demo(state: &SharedState, owner: Id) -> anyhow::Result<()> {
             created_by: Some(owner),
             created_at: now,
             updated_at: now,
+            source: Default::default(),
         };
         state.db.save_ticket(&ticket).await?;
     }

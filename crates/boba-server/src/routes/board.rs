@@ -237,21 +237,27 @@ pub async fn update_tab(
             .filter(|c| !cols.iter().any(|n| n.id == c.id))
             .collect();
         if !removed.is_empty() {
-            for mut t in state.db.tickets_in_tab(tab.id).await? {
+            // Appended at the bottom of their new column, in their previous order.
+            let mut bottoms: std::collections::HashMap<Id, f64> = std::collections::HashMap::new();
+            for t in state.db.tickets_in_tab(tab.id).await? {
                 if let Some(old) = removed.iter().find(|c| c.id == t.column_id) {
                     let dest = cols.iter().find(|c| c.kind == old.kind).unwrap_or(&cols[0]);
-                    t.column_id = dest.id;
-                    t.updated_at = chrono::Utc::now();
-                    moved.push(t);
+                    let bottom = match bottoms.get(&dest.id) {
+                        Some(b) => *b,
+                        None => state.db.max_position(dest.id).await?,
+                    } + 1024.0;
+                    bottoms.insert(dest.id, bottom);
+                    moved.push((t.id, dest.id, bottom));
                 }
             }
         }
         tab.columns = cols;
     }
-    state.db.save_tab(&tab).await?;
-    for t in &moved {
-        state.db.save_ticket(t).await?;
-        state.upsert(Entity::Ticket(t.clone()));
+    state.db.save_tab_moving(&tab, &moved).await?;
+    for (tid, _, _) in &moved {
+        if let Some(t) = state.db.ticket(*tid).await? {
+            state.upsert(Entity::Ticket(t));
+        }
     }
     state.upsert(Entity::Tab(tab.clone()));
     state
@@ -283,7 +289,7 @@ pub async fn delete_tab(
     let tickets = state.db.tickets_in_tab(id).await?;
     if active
         .iter()
-        .any(|r| tickets.iter().any(|t| t.id == r.ticket_id))
+        .any(|r| tickets.iter().any(|t| Some(t.id) == r.ticket_id))
     {
         return Err(AppError::conflict(
             "agents are still working in this tab; cancel their runs first",
@@ -344,8 +350,9 @@ pub async fn create_repo(
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "main".into()),
         runner_id: req.runner_id,
+        sync: req.sync.unwrap_or_default(),
     };
-    state.db.insert_repo(&repo).await?;
+    state.db.save_repo(&repo).await?;
     state.upsert(Entity::Repo(repo.clone()));
     // Project skills of the new repo become available.
     let s2 = state.clone();

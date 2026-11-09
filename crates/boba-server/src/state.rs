@@ -291,6 +291,9 @@ impl AppState {
             history,
             settings: db.workspace_settings(self.cfg.demo_mode).await?,
             stats: self.stats().await?,
+            // Filled once the scheduler and connectors land.
+            jobs: Vec::new(),
+            connectors: Vec::new(),
         })
     }
 }

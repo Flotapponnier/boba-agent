@@ -12,8 +12,8 @@ use boba_core::{Id, Permission, User};
 use futures::{SinkExt, StreamExt};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::auth::Auth;
-use crate::error::AppResult;
+use crate::auth::SessionAuth;
+use crate::error::{AppError, AppResult};
 use crate::hub::{ConnId, REPLAY_LINES};
 use crate::state::SharedState;
 
@@ -23,23 +23,26 @@ const MAX_SUBSCRIPTIONS: usize = 32;
 
 pub async fn upgrade(
     State(state): State<SharedState>,
-    me: Auth,
+    me: SessionAuth,
     ws: WebSocketUpgrade,
 ) -> AppResult<Response> {
-    me.require(Permission::View)?;
-    let user = me.0;
+    if !me.user.role.grants(Permission::View) {
+        return Err(AppError::forbidden("your role cannot view this workspace"));
+    }
+    let SessionAuth { user, token_hash } = me;
     Ok(ws
         .max_message_size(64 * 1024)
-        .on_upgrade(move |socket| async move { session(state, user, socket).await }))
+        .on_upgrade(move |socket| async move { session(state, user, token_hash, socket).await }))
 }
 
-async fn session(state: SharedState, user: User, socket: WebSocket) {
+async fn session(state: SharedState, user: User, token_hash: String, socket: WebSocket) {
     let conn = state.hub.new_conn_id();
     let (mut sink, mut stream) = socket.split();
     // Direct messages to this socket (snapshot, run logs). Bounded: a socket that cannot
     // keep up drops log lines rather than stalling the run.
     let (tx, mut rx) = mpsc::channel::<ServerMessage>(1024);
     let mut board = state.hub.subscribe();
+    let mut revoked = state.hub.revocations();
     let mut subs: HashSet<Id> = HashSet::new();
 
     // The snapshot goes straight to the socket so it is always the first message.
@@ -94,8 +97,21 @@ async fn session(state: SharedState, user: User, socket: WebSocket) {
                     _ => {}
                 }
             }
+            r = revoked.recv() => match r {
+                Ok(h) if h == token_hash => {
+                    let _ = sink.send(Message::Close(None)).await;
+                    break;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+                _ => {}
+            },
             _ = ping.tick() => {
                 if last_seen.elapsed() > IDLE_TIMEOUT {
+                    break;
+                }
+                // Session expired or was removed: stop streaming.
+                if !matches!(state.db.session_user(&token_hash).await, Ok(Some(_))) {
+                    let _ = sink.send(Message::Close(None)).await;
                     break;
                 }
                 if sink.send(Message::Ping(Default::default())).await.is_err() { break; }

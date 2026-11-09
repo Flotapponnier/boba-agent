@@ -75,6 +75,12 @@ fn s(v: Option<Id>) -> Option<String> {
     v.map(|i| i.to_string())
 }
 
+/// Automatic review attempts per entry into a review column.
+pub const REVIEW_ATTEMPTS: i64 = 2;
+
+/// Invite links are valid this long.
+pub const INVITE_DAYS: i64 = 7;
+
 pub fn new_id() -> Id {
     Id::now_v7()
 }
@@ -143,12 +149,17 @@ impl Db {
         self.set_setting("workspace", &json(s)).await
     }
 
-    /// Next human ticket number (T-n), persisted.
+    /// Next human ticket number (T-n): a monotonic counter, never reused after deletes.
     pub async fn next_ticket_number(&self) -> anyhow::Result<i64> {
-        let n: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(number), 0) + 1 FROM tickets")
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(n)
+        let v: String = sqlx::query_scalar(
+            "INSERT INTO settings(key, value)
+               VALUES('ticket_seq', (SELECT CAST(COALESCE(MAX(number), 0) + 1 AS TEXT) FROM tickets))
+             ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
+             RETURNING value",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(v.parse()?)
     }
 
     // ------------------------------------------------------------ users & sessions
@@ -202,14 +213,26 @@ impl Db {
             .transpose()
     }
 
-    pub async fn user_by_invite(&self, token_hash: &str) -> anyhow::Result<Option<User>> {
-        sqlx::query("SELECT * FROM users WHERE invite_token_hash = ?")
-            .bind(token_hash)
-            .fetch_optional(&self.pool)
-            .await?
-            .as_ref()
-            .map(Self::user_row)
-            .transpose()
+    /// Consume an invite atomically: sets the password only if the token is valid and
+    /// unexpired, and clears it in the same statement (no double accept).
+    pub async fn accept_invite(
+        &self,
+        token_hash: &str,
+        password_hash: &str,
+    ) -> anyhow::Result<Option<User>> {
+        let uid: Option<String> = sqlx::query_scalar(
+            "UPDATE users SET password_hash = ?, invite_token_hash = NULL, invite_expires_at = NULL
+             WHERE invite_token_hash = ? AND invite_expires_at > ? RETURNING id",
+        )
+        .bind(password_hash)
+        .bind(token_hash)
+        .bind(ts(Utc::now()))
+        .fetch_optional(&self.pool)
+        .await?;
+        match uid {
+            Some(id) => self.user(Id::parse_str(&id)?).await,
+            None => Ok(None),
+        }
     }
 
     pub async fn insert_user(
@@ -218,9 +241,12 @@ impl Db {
         password_hash: Option<&str>,
         invite_token_hash: Option<&str>,
     ) -> anyhow::Result<()> {
+        let expires =
+            invite_token_hash.map(|_| ts(Utc::now() + chrono::Duration::days(INVITE_DAYS)));
         sqlx::query(
-            "INSERT INTO users(id, name, email, role, avatar, password_hash, invite_token_hash, created_at)
-             VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO users(id, name, email, role, avatar, password_hash, invite_token_hash,
+               invite_expires_at, created_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(u.id.to_string())
         .bind(&u.name)
@@ -229,18 +255,10 @@ impl Db {
         .bind(&u.avatar)
         .bind(password_hash)
         .bind(invite_token_hash)
+        .bind(expires)
         .bind(ts(u.created_at))
         .execute(&self.pool)
         .await?;
-        Ok(())
-    }
-
-    pub async fn set_password(&self, uid: Id, hash: &str) -> anyhow::Result<()> {
-        sqlx::query("UPDATE users SET password_hash = ?, invite_token_hash = NULL WHERE id = ?")
-            .bind(hash)
-            .bind(uid.to_string())
-            .execute(&self.pool)
-            .await?;
         Ok(())
     }
 
@@ -319,6 +337,7 @@ impl Db {
             remote_url: row.try_get("remote_url")?,
             default_branch: row.try_get("default_branch")?,
             runner_id: opt_id(row, "runner_id")?,
+            sync: serde_json::from_str(&row.try_get::<String, _>("sync")?).unwrap_or_default(),
         })
     }
 
@@ -341,9 +360,13 @@ impl Db {
             .transpose()
     }
 
-    pub async fn insert_repo(&self, r: &Repo) -> anyhow::Result<()> {
+    pub async fn save_repo(&self, r: &Repo) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO repos(id, name, path, remote_url, default_branch, runner_id) VALUES(?, ?, ?, ?, ?, ?)",
+            "INSERT INTO repos(id, name, path, remote_url, default_branch, runner_id, sync)
+             VALUES(?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, path = excluded.path,
+               remote_url = excluded.remote_url, default_branch = excluded.default_branch,
+               runner_id = excluded.runner_id, sync = excluded.sync",
         )
         .bind(r.id.to_string())
         .bind(&r.name)
@@ -351,6 +374,7 @@ impl Db {
         .bind(&r.remote_url)
         .bind(&r.default_branch)
         .bind(s(r.runner_id))
+        .bind(json(&r.sync))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -464,6 +488,12 @@ impl Db {
 
     /// Insert or update the tab and replace its column list atomically.
     pub async fn save_tab(&self, t: &Tab) -> anyhow::Result<()> {
+        self.save_tab_moving(t, &[]).await
+    }
+
+    /// Save the tab + its columns and move tickets (id, column, position) in one transaction,
+    /// so tickets of removed columns are never left pointing at a deleted column.
+    pub async fn save_tab_moving(&self, t: &Tab, moves: &[(Id, Id, f64)]) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO tabs(id, name, icon, color, position, repo_id) VALUES(?, ?, ?, ?, ?, ?)
@@ -508,6 +538,20 @@ impl Db {
             .bind(s(c.auto_reviewer_agent_id))
             .bind(s(c.on_approve_column_id))
             .bind(s(c.on_changes_column_id))
+            .execute(&mut *tx)
+            .await?;
+        }
+        let now = ts(Utc::now());
+        for (ticket, column, position) in moves {
+            sqlx::query(
+                "UPDATE tickets SET column_id = ?, position = ?, updated_at = ?, entered_column_at = ?
+                 WHERE id = ?",
+            )
+            .bind(column.to_string())
+            .bind(position)
+            .bind(&now)
+            .bind(&now)
+            .bind(ticket.to_string())
             .execute(&mut *tx)
             .await?;
         }
@@ -643,9 +687,35 @@ impl Db {
             prs_approved: row.try_get::<i64, _>("prs_approved")? as u32,
             status: dec(&row.try_get::<String, _>("status")?)?,
             current_run_id: opt_id(row, "current_run_id")?,
+            connector_ids: Vec::new(),
+            board_tools: row.try_get::<i64, _>("board_tools")? != 0,
             created_by: opt_id(row, "created_by")?,
             created_at: time(row, "created_at")?,
         })
+    }
+
+    /// Skills + connectors of one agent (indexed lookups).
+    async fn attach_skills_for(&self, one: &mut [Agent; 1]) -> anyhow::Result<()> {
+        let aid = one[0].id.to_string();
+        one[0].skill_ids = sqlx::query_scalar::<_, String>(
+            "SELECT skill_id FROM agent_skills WHERE agent_id = ? ORDER BY position",
+        )
+        .bind(&aid)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .filter_map(|s| Id::parse_str(s).ok())
+        .collect();
+        one[0].connector_ids = sqlx::query_scalar::<_, String>(
+            "SELECT connector_id FROM agent_connectors WHERE agent_id = ? ORDER BY position",
+        )
+        .bind(&aid)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .filter_map(|s| Id::parse_str(s).ok())
+        .collect();
+        Ok(())
     }
 
     async fn attach_skills(&self, agents: &mut [Agent]) -> anyhow::Result<()> {
@@ -657,6 +727,17 @@ impl Db {
             let sid = id(&r, "skill_id")?;
             if let Some(a) = agents.iter_mut().find(|a| a.id == aid) {
                 a.skill_ids.push(sid);
+            }
+        }
+        let rows =
+            sqlx::query("SELECT agent_id, connector_id FROM agent_connectors ORDER BY position")
+                .fetch_all(&self.pool)
+                .await?;
+        for r in rows {
+            let aid = id(&r, "agent_id")?;
+            let cid = id(&r, "connector_id")?;
+            if let Some(a) = agents.iter_mut().find(|a| a.id == aid) {
+                a.connector_ids.push(cid);
             }
         }
         Ok(())
@@ -681,16 +762,9 @@ impl Db {
         else {
             return Ok(None);
         };
-        let mut a = Self::agent_row(&row)?;
-        a.skill_ids = sqlx::query_scalar::<_, String>(
-            "SELECT skill_id FROM agent_skills WHERE agent_id = ? ORDER BY position",
-        )
-        .bind(aid.to_string())
-        .fetch_all(&self.pool)
-        .await?
-        .iter()
-        .filter_map(|s| Id::parse_str(s).ok())
-        .collect();
+        let mut a = [Self::agent_row(&row)?];
+        self.attach_skills_for(&mut a).await?;
+        let [a] = a;
         Ok(Some(a))
     }
 
@@ -699,15 +773,16 @@ impl Db {
         sqlx::query(
             "INSERT INTO agents(id, name, role, sprite, color, tagline, system_prompt, model,
                permission_mode, allowed_tools, max_turns, xp, level, runs_completed, prs_approved,
-               status, current_run_id, created_by, created_at)
-             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               status, current_run_id, board_tools, created_by, created_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role,
                sprite = excluded.sprite, color = excluded.color, tagline = excluded.tagline,
                system_prompt = excluded.system_prompt, model = excluded.model,
                permission_mode = excluded.permission_mode, allowed_tools = excluded.allowed_tools,
                max_turns = excluded.max_turns, xp = excluded.xp, level = excluded.level,
                runs_completed = excluded.runs_completed, prs_approved = excluded.prs_approved,
-               status = excluded.status, current_run_id = excluded.current_run_id",
+               status = excluded.status, current_run_id = excluded.current_run_id,
+               board_tools = excluded.board_tools",
         )
         .bind(a.id.to_string())
         .bind(&a.name)
@@ -726,6 +801,7 @@ impl Db {
         .bind(a.prs_approved as i64)
         .bind(enc(&a.status))
         .bind(s(a.current_run_id))
+        .bind(a.board_tools as i64)
         .bind(s(a.created_by))
         .bind(ts(a.created_at))
         .execute(&mut *tx)
@@ -745,6 +821,18 @@ impl Db {
             .bind(sid.to_string())
             .execute(&mut *tx)
             .await?;
+        }
+        sqlx::query("DELETE FROM agent_connectors WHERE agent_id = ?")
+            .bind(a.id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        for (i, cid) in a.connector_ids.iter().enumerate() {
+            sqlx::query("INSERT OR IGNORE INTO agent_connectors(agent_id, connector_id, position) VALUES(?, ?, ?)")
+                .bind(a.id.to_string())
+                .bind(cid.to_string())
+                .bind(i as i64)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -783,6 +871,7 @@ impl Db {
             created_by: opt_id(row, "created_by")?,
             created_at: time(row, "created_at")?,
             updated_at: time(row, "updated_at")?,
+            source: serde_json::from_str(&row.try_get::<String, _>("source")?).unwrap_or_default(),
         })
     }
 
@@ -831,8 +920,8 @@ impl Db {
         sqlx::query(
             "INSERT INTO tickets(id, number, tab_id, column_id, position, title, body, tags, priority,
                color, repo_id, agent_id, branch, pr_url, pr_number, review_feedback, review_rounds,
-               created_by, created_at, updated_at, entered_column_at)
-             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               created_by, created_at, updated_at, source, entered_column_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                entered_column_at = CASE WHEN tickets.column_id <> excluded.column_id
                                    THEN excluded.entered_column_at ELSE tickets.entered_column_at END,
@@ -841,7 +930,8 @@ impl Db {
                priority = excluded.priority, color = excluded.color, repo_id = excluded.repo_id,
                agent_id = excluded.agent_id, branch = excluded.branch, pr_url = excluded.pr_url,
                pr_number = excluded.pr_number, review_feedback = excluded.review_feedback,
-               review_rounds = excluded.review_rounds, updated_at = excluded.updated_at",
+               review_rounds = excluded.review_rounds, updated_at = excluded.updated_at,
+               source = excluded.source",
         )
         .bind(t.id.to_string())
         .bind(t.number)
@@ -863,6 +953,7 @@ impl Db {
         .bind(s(t.created_by))
         .bind(ts(t.created_at))
         .bind(ts(t.updated_at))
+        .bind(json(&t.source))
         .bind(ts(Utc::now()))
         .execute(&self.pool)
         .await?;
@@ -883,12 +974,19 @@ impl Db {
         let rows: Vec<String> = sqlx::query_scalar(
             "SELECT t.id FROM tickets t JOIN columns c ON c.id = t.column_id
              WHERE c.kind = 'review' AND c.auto_reviewer_agent_id = ?
+               -- nothing running on it
                AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.ticket_id = t.id
-                               AND (r.created_at >= t.entered_column_at
-                                    OR r.status IN ('queued', 'running', 'waiting')))
+                               AND r.status IN ('queued', 'running', 'waiting'))
+               -- not reviewed (or cancelled by a human) since it entered the column
+               AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.ticket_id = t.id
+                               AND r.created_at >= t.entered_column_at AND r.status <> 'failed')
+               -- a failed review is retried once, then the ticket waits for a human
+               AND (SELECT COUNT(*) FROM runs r WHERE r.ticket_id = t.id
+                    AND r.created_at >= t.entered_column_at AND r.status = 'failed') < ?
              ORDER BY t.entered_column_at",
         )
         .bind(reviewer.to_string())
+        .bind(REVIEW_ATTEMPTS)
         .fetch_all(&self.pool)
         .await?;
         rows.iter()
@@ -902,7 +1000,8 @@ impl Db {
         let verdict: Option<String> = row.try_get("verdict")?;
         Ok(Run {
             id: id(row, "id")?,
-            ticket_id: id(row, "ticket_id")?,
+            ticket_id: opt_id(row, "ticket_id")?,
+            job_id: opt_id(row, "job_id")?,
             agent_id: id(row, "agent_id")?,
             kind: dec(&row.try_get::<String, _>("kind")?)?,
             status: dec(&row.try_get::<String, _>("status")?)?,
@@ -997,11 +1096,12 @@ impl Db {
         resume_session_id: Option<&str>,
     ) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO runs(id, ticket_id, agent_id, kind, status, runner_id, created_at, started_by,
-               extra_instructions, resume_session_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO runs(id, ticket_id, job_id, agent_id, kind, status, runner_id, created_at,
+               started_by, extra_instructions, resume_session_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.to_string())
-        .bind(r.ticket_id.to_string())
+        .bind(s(r.ticket_id))
+        .bind(s(r.job_id))
         .bind(r.agent_id.to_string())
         .bind(enc(&r.kind))
         .bind(enc(&r.status))

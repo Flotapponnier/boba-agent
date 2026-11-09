@@ -23,6 +23,8 @@ struct Script {
     verdicts: VecDeque<ReviewVerdict>,
     /// Never finish work runs (to test cancel / restart recovery).
     hang: bool,
+    /// Accept runs but never send anything (they stay Queued).
+    silent: bool,
     specs: Vec<RunSpec>,
     cancelled: Vec<Id>,
 }
@@ -51,6 +53,9 @@ impl FakeRunner {
     }
     fn hang(&self, h: bool) {
         self.script.lock().unwrap().hang = h;
+    }
+    fn silent(&self, v: bool) {
+        self.script.lock().unwrap().silent = v;
     }
     fn specs(&self) -> Vec<RunSpec> {
         self.script.lock().unwrap().specs.clone()
@@ -85,6 +90,11 @@ impl Runner for FakeRunner {
         let (verdict, hang) = {
             let mut s = self.script.lock().unwrap();
             s.specs.push(spec.clone());
+            if s.silent {
+                drop(s);
+                self.live.lock().unwrap().push((spec.run_id, tx));
+                return Ok(());
+            }
             let v = if spec.kind == RunKind::Review {
                 s.verdicts.pop_front().or(Some(ReviewVerdict::Approved))
             } else {
@@ -99,11 +109,11 @@ impl Runner for FakeRunner {
                 .resume_session_id
                 .clone()
                 .unwrap_or_else(|| format!("sess-{id}"));
-            let branch = spec
-                .ticket
+            let t = spec.ticket.clone().expect("ticket runs only");
+            let branch = t
                 .branch
                 .clone()
-                .unwrap_or_else(|| format!("boba/T-{}", spec.ticket.number));
+                .unwrap_or_else(|| format!("boba/T-{}", t.number));
             let _ = tx
                 .send(RunUpdate::Started {
                     worktree_path: format!("/tmp/wt/{id}"),
@@ -130,7 +140,7 @@ impl Runner for FakeRunner {
             if hang && spec.kind == RunKind::Work {
                 return; // tx kept alive in `live`
             }
-            if spec.kind == RunKind::Work && spec.ticket.pr_number.is_none() {
+            if spec.kind == RunKind::Work && spec.ticket.as_ref().unwrap().pr_number.is_none() {
                 let _ = tx
                     .send(RunUpdate::PrOpened {
                         number: 7,
@@ -151,6 +161,7 @@ impl Runner for FakeRunner {
                         verdict,
                         feedback,
                         error: None,
+                        plan: None,
                     },
                 })
                 .await;
@@ -175,6 +186,7 @@ impl Runner for FakeRunner {
                         verdict: None,
                         feedback: None,
                         error: Some("cancelled".into()),
+                        plan: None,
                     },
                 })
                 .await;
@@ -566,7 +578,7 @@ async fn work_then_auto_review_approved() {
     let specs = srv.runner.specs();
     let review = specs.iter().find(|s| s.kind == RunKind::Review).unwrap();
     assert_eq!(review.agent.permission_mode, PermissionMode::Plan);
-    assert_eq!(review.ticket.pr_number, Some(7));
+    assert_eq!(review.ticket.as_ref().unwrap().pr_number, Some(7));
     assert_eq!(specs[0].extra_instructions.as_deref(), Some("Be quick"));
     assert!(!specs[0].skill_paths.is_empty());
 
@@ -654,11 +666,11 @@ async fn changes_requested_then_fixed() {
         Some(&*format!("sess-{}", specs[0].run_id))
     );
     assert_eq!(
-        second.ticket.review_feedback.as_deref(),
+        second.ticket.as_ref().unwrap().review_feedback.as_deref(),
         Some("Please add tests")
     );
-    assert_eq!(second.ticket.review_rounds, 1);
-    assert_eq!(second.ticket.pr_number, Some(7));
+    assert_eq!(second.ticket.as_ref().unwrap().review_rounds, 1);
+    assert_eq!(second.ticket.as_ref().unwrap().pr_number, Some(7));
     let tk = ticket(&snap, t);
     assert_eq!(tk.review_feedback, None);
     // Ticket tagged "frontend" (a Boba Dev skill): 60 + 60 XP, no first-round bonus
@@ -712,7 +724,10 @@ async fn reviewer_queue_is_fifo() {
     }
     // Nothing started for them: the reviewer is busy.
     let snap = srv.snapshot(&c).await;
-    assert!(snap.runs.iter().all(|r| !ids.contains(&r.ticket_id)));
+    assert!(snap
+        .runs
+        .iter()
+        .all(|r| r.ticket_id.is_none_or(|t| !ids.contains(&t))));
     // Free the reviewer by cancelling its run; the queue drains in order.
     let run_id = agent(&snap, "Uncle Review").current_run_id.unwrap();
     let (s, v) = srv
@@ -730,7 +745,7 @@ async fn reviewer_queue_is_fifo() {
         .specs()
         .iter()
         .filter(|s| s.kind == RunKind::Review)
-        .map(|s| s.ticket.id)
+        .map(|s| s.ticket.as_ref().unwrap().id)
         .collect();
     assert_eq!(&order[order.len() - 3..], &ids[..]);
 }
@@ -841,6 +856,19 @@ async fn restart_recovery() {
         s.runs.iter().any(|r| r.status == RunStatus::Running)
     })
     .await;
+    // A second run the runner accepted but never started: still Queued at "crash" time.
+    srv.runner.silent(true);
+    let t2 = snap.tickets[1].id;
+    let qa = agent(&snap, "Golden QA").id;
+    let (s, v) = srv
+        .post(
+            &c,
+            &format!("/tickets/{t2}/assign"),
+            json!({"agent_id": qa}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["status"], "queued");
 
     // A second server on the same data dir = a restart.
     let srv2 = start_in(srv.dir.clone(), FakeRunner::new()).await;
@@ -852,7 +880,7 @@ async fn restart_recovery() {
     )
     .await;
     let snap = srv2.snapshot(&c2).await;
-    let run = snap.runs.iter().find(|r| r.ticket_id == t).unwrap();
+    let run = snap.runs.iter().find(|r| r.ticket_id == Some(t)).unwrap();
     assert_eq!(run.status, RunStatus::Failed);
     assert_eq!(run.error.as_deref(), Some("server restarted"));
     assert!(all_idle(&snap));
@@ -862,6 +890,203 @@ async fn restart_recovery() {
         tk.review_feedback.as_deref(),
         Some("Run failed: server restarted")
     );
+    // The queued run was failed too, and recovery handed nothing to the new runner
+    // (no run is started and then marked failed behind the runner's back).
+    let queued = snap.runs.iter().find(|r| r.ticket_id == Some(t2)).unwrap();
+    assert_eq!(queued.status, RunStatus::Failed);
+    assert!(srv2.runner.specs().is_empty(), "recovery dispatched runs");
+}
+
+#[tokio::test]
+async fn approval_routes_into_a_second_review_column() {
+    let srv = start().await;
+    let c = srv.owner().await;
+    let snap = srv.snapshot(&c).await;
+    let uncle = agent(&snap, "Uncle Review").id;
+    let qa = agent(&snap, "Golden QA").id;
+    let dev = agent(&snap, "Boba Dev").id;
+    // Todo, Doing, Code review (Uncle) -> QA review (Golden QA) -> Done.
+    let (s, tab) = srv
+        .post(
+            &c,
+            "/tabs",
+            json!({"name": "Two step", "columns": [
+                {"name": "Todo", "kind": "todo"},
+                {"name": "Doing", "kind": "doing"},
+                {"name": "Code review", "kind": "review", "auto_reviewer_agent_id": uncle},
+                {"name": "QA review", "kind": "review", "auto_reviewer_agent_id": qa},
+                {"name": "Done", "kind": "done"}
+            ]}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{tab}");
+    let tab: Tab = serde_json::from_value(tab).unwrap();
+    let mut cols: Vec<ColumnSpec> = tab
+        .columns
+        .iter()
+        .map(|c| ColumnSpec {
+            id: Some(c.id),
+            name: c.name.clone(),
+            kind: c.kind,
+            color: None,
+            auto_reviewer_agent_id: c.auto_reviewer_agent_id,
+            on_approve_column_id: None,
+            on_changes_column_id: None,
+        })
+        .collect();
+    cols[2].on_approve_column_id = Some(tab.columns[3].id);
+    let (s, v) = srv
+        .req(
+            &c,
+            "PATCH",
+            &format!("/tabs/{}", tab.id),
+            Some(json!({"columns": cols})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, tk) = srv
+        .post(
+            &c,
+            "/tickets",
+            json!({"tab_id": tab.id, "title": "Two reviews"}),
+        )
+        .await;
+    let t: Id = serde_json::from_value(tk["id"].clone()).unwrap();
+    srv.post(
+        &c,
+        &format!("/tickets/{t}/assign"),
+        json!({"agent_id": dev}),
+    )
+    .await;
+    srv.until(&c, "both reviews", |s| {
+        column_kind(s, ticket(s, t)) == ColumnKind::Done && all_idle(s)
+    })
+    .await;
+    let reviewers: Vec<Id> = srv
+        .runner
+        .specs()
+        .iter()
+        .filter(|s| s.kind == RunKind::Review)
+        .map(|s| s.agent.id)
+        .collect();
+    assert_eq!(reviewers, vec![uncle, qa]);
+}
+
+#[tokio::test]
+async fn invites_are_single_use_and_logins_do_not_leak_them() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let (_, v) = srv
+        .post(
+            &owner,
+            "/users/invite",
+            json!({"email": "new@test.io", "name": "New", "role": "member"}),
+        )
+        .await;
+    let token = v["invite_url"]
+        .as_str()
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_string();
+    let c = client();
+    // Pending invite: same answer as a wrong password.
+    let (s1, pending) = srv
+        .post(
+            &c,
+            "/auth/login",
+            json!({"email": "new@test.io", "password": "whatever1"}),
+        )
+        .await;
+    let (s2, wrong) = srv
+        .post(
+            &c,
+            "/auth/login",
+            json!({"email": "owner@test.io", "password": "whatever1"}),
+        )
+        .await;
+    assert_eq!((s1, &pending), (s2, &wrong));
+    let accept = json!({"token": token, "password": "password123"});
+    assert_eq!(
+        srv.post(&c, "/auth/accept-invite", accept.clone()).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        srv.post(&client(), "/auth/accept-invite", accept).await.0,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn ticket_numbers_are_never_reused() {
+    let srv = start().await;
+    let c = srv.owner().await;
+    let snap = srv.snapshot(&c).await;
+    let last = snap.tickets.iter().max_by_key(|t| t.number).unwrap();
+    assert_eq!(
+        srv.req(&c, "DELETE", &format!("/tickets/{}", last.id), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, v) = srv
+        .post(
+            &c,
+            "/tickets",
+            json!({"tab_id": last.tab_id, "title": "New one"}),
+        )
+        .await;
+    assert_eq!(v["number"], json!(last.number + 1));
+}
+
+#[tokio::test]
+async fn websocket_closes_on_logout() {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let srv = start().await;
+    let _owner = srv.owner().await;
+    let res = reqwest::Client::new()
+        .post(format!("{}/auth/login", srv.base))
+        .json(&json!({"email": "owner@test.io", "password": "correct horse"}))
+        .send()
+        .await
+        .unwrap();
+    let cookie = res.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let ws_url = srv.base.replace("http://", "ws://") + "/ws";
+    let mut req = ws_url.as_str().into_client_request().unwrap();
+    req.headers_mut().insert("cookie", cookie.parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    // Snapshot first.
+    let first = tokio::time::timeout(Duration::from_secs(5), ws.next())
+        .await
+        .unwrap();
+    assert!(matches!(first, Some(Ok(Message::Text(_)))));
+
+    let res = reqwest::Client::new()
+        .post(format!("{}/auth/logout", srv.base))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match ws.next().await {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return true,
+                Some(Ok(_)) => continue,
+            }
+        }
+    })
+    .await;
+    assert_eq!(closed, Ok(true), "socket stayed open after logout");
 }
 
 #[tokio::test]

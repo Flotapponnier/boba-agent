@@ -114,10 +114,11 @@ pub async fn login(
         let _ = auth::hash_password(&req.password);
         return Err(bad());
     };
+    // A pending invite has no password: same answer as a wrong password, so the
+    // endpoint does not reveal who was invited.
     let Some(hash) = hash else {
-        return Err(AppError::bad(
-            "this account has not accepted its invite yet",
-        ));
+        let _ = auth::hash_password(&req.password);
+        return Err(bad());
     };
     if !auth::verify_password(&req.password, &hash) {
         return Err(bad());
@@ -131,10 +132,9 @@ pub async fn logout(
     jar: CookieJar,
 ) -> AppResult<(CookieJar, StatusCode)> {
     if let Some(c) = jar.get(auth::COOKIE) {
-        state
-            .db
-            .delete_session(&auth::hash_token(c.value()))
-            .await?;
+        let hash = auth::hash_token(c.value());
+        state.db.delete_session(&hash).await?;
+        state.hub.revoke_session(&hash);
     }
     Ok((jar.remove(auth::clear_cookie()), StatusCode::NO_CONTENT))
 }
@@ -186,15 +186,12 @@ pub async fn accept_invite(
     Json(req): Json<AcceptInvite>,
 ) -> AppResult<(CookieJar, Json<User>)> {
     auth::validate_password(&req.password)?;
+    let hash = auth::hash_password(&req.password)?;
     let user = state
         .db
-        .user_by_invite(&auth::hash_token(req.token.trim()))
+        .accept_invite(&auth::hash_token(req.token.trim()), &hash)
         .await?
-        .ok_or_else(|| AppError::bad("this invite link is invalid or was already used"))?;
-    state
-        .db
-        .set_password(user.id, &auth::hash_password(&req.password)?)
-        .await?;
+        .ok_or_else(|| AppError::bad("this invite link is invalid, expired or already used"))?;
     state
         .record(
             HistoryKind::UserJoined,

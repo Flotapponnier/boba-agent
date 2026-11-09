@@ -98,6 +98,36 @@ pub async fn current_user(state: &SharedState, jar: &CookieJar) -> AppResult<Opt
     Ok(state.db.session_user(&hash_token(c.value())).await?)
 }
 
+/// Extractor: a signed-in user plus the hash of their session token (for sockets that must
+/// close when that session ends).
+pub struct SessionAuth {
+    pub user: User,
+    pub token_hash: String,
+}
+
+impl FromRequestParts<SharedState> for SessionAuth {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &SharedState,
+    ) -> Result<Self, Self::Rejection> {
+        let jar = CookieJar::from_headers(&parts.headers);
+        let token = jar
+            .get(COOKIE)
+            .map(|c| c.value().to_string())
+            .filter(|v| !v.is_empty())
+            .ok_or(AppError::Unauthorized)?;
+        let token_hash = hash_token(&token);
+        let user = state
+            .db
+            .session_user(&token_hash)
+            .await?
+            .ok_or(AppError::Unauthorized)?;
+        Ok(Self { user, token_hash })
+    }
+}
+
 /// Extractor: a signed-in user (401 otherwise).
 pub struct Auth(pub User);
 
@@ -125,6 +155,7 @@ fn permission_phrase(p: Permission) -> &'static str {
         Permission::ManageSkills => "manage skills",
         Permission::ManageWorkspace => "manage the workspace",
         Permission::ManageUsers => "manage users",
+        Permission::ManageAutomations => "manage automations",
     }
 }
 

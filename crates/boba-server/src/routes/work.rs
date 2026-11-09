@@ -4,6 +4,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use boba_core::api::*;
+use boba_core::automation::TicketSource;
 use boba_core::event::{Entity, EntityKind, HistoryEvent, HistoryKind};
 use boba_core::*;
 use chrono::Utc;
@@ -95,6 +96,8 @@ pub async fn create_agent(
         prs_approved: 0,
         status: AgentStatus::Idle,
         current_run_id: None,
+        connector_ids: req.connector_ids.unwrap_or_default(),
+        board_tools: req.board_tools.unwrap_or(false),
         created_by: Some(me.id),
         created_at: Utc::now(),
     };
@@ -164,6 +167,12 @@ pub async fn update_agent(
     }
     if let Some(v) = req.max_turns {
         a.max_turns = v;
+    }
+    if let Some(v) = req.connector_ids {
+        a.connector_ids = v;
+    }
+    if let Some(v) = req.board_tools {
+        a.board_tools = v;
     }
     state.db.save_agent(&a).await?;
     state.upsert(Entity::Agent(a.clone()));
@@ -278,6 +287,7 @@ pub async fn create_ticket(
         created_by: Some(me.id),
         created_at: now,
         updated_at: now,
+        source: TicketSource::Manual,
     };
     state.db.save_ticket(&ticket).await?;
     state.upsert(Entity::Ticket(ticket.clone()));

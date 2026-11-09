@@ -9,6 +9,7 @@ CREATE TABLE users (
     avatar        TEXT NOT NULL,
     password_hash TEXT,
     invite_token_hash TEXT UNIQUE,
+    invite_expires_at TEXT,
     created_at    TEXT NOT NULL
 );
 
@@ -31,7 +32,9 @@ CREATE TABLE repos (
     path           TEXT NOT NULL,
     remote_url     TEXT,
     default_branch TEXT NOT NULL,
-    runner_id      TEXT
+    runner_id      TEXT,
+    -- automation::RepoSync as JSON
+    sync           TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE runners (
@@ -90,6 +93,7 @@ CREATE TABLE agents (
     prs_approved    INTEGER NOT NULL DEFAULT 0,
     status          TEXT NOT NULL,
     current_run_id  TEXT,
+    board_tools     INTEGER NOT NULL DEFAULT 0,
     created_by      TEXT,
     created_at      TEXT NOT NULL
 );
@@ -99,6 +103,14 @@ CREATE TABLE agent_skills (
     skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
     position INTEGER NOT NULL,
     PRIMARY KEY (agent_id, skill_id)
+);
+
+-- Connectors (MCP servers) an agent may use. No FK: the connectors table ships separately.
+CREATE TABLE agent_connectors (
+    agent_id     TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    connector_id TEXT NOT NULL,
+    position     INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, connector_id)
 );
 
 CREATE TABLE tickets (
@@ -122,6 +134,8 @@ CREATE TABLE tickets (
     created_by       TEXT,
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL,
+    -- automation::TicketSource as JSON
+    source           TEXT NOT NULL DEFAULT '{"kind":"manual"}',
     -- server-internal: when the ticket entered its current column (review queue order)
     entered_column_at TEXT NOT NULL
 );
@@ -129,7 +143,9 @@ CREATE INDEX tickets_column ON tickets(column_id, position);
 
 CREATE TABLE runs (
     id            TEXT PRIMARY KEY,
-    ticket_id     TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    -- NULL for job / command runs
+    ticket_id     TEXT REFERENCES tickets(id) ON DELETE CASCADE,
+    job_id        TEXT,
     agent_id      TEXT NOT NULL,
     kind          TEXT NOT NULL,
     status        TEXT NOT NULL,
@@ -155,6 +171,7 @@ CREATE TABLE runs (
 );
 CREATE INDEX runs_ticket ON runs(ticket_id, created_at);
 CREATE INDEX runs_status ON runs(status);
+CREATE INDEX runs_job ON runs(job_id, created_at);
 
 CREATE TABLE run_logs (
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
