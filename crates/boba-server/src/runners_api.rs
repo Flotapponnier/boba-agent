@@ -235,6 +235,8 @@ async fn session(state: SharedState, row: RemoteRunnerRow, mut socket: WebSocket
         return;
     };
     // Anthropic's terms: a Claude subscription only ever runs its owner's work.
+    // `auth` is self-reported by the runner and cannot be verified from here: this rule
+    // relies on honest runners (shared ones are registered by admins).
     if row.scope == RunnerScope::Shared && auth == RunnerAuth::Subscription {
         close(
             socket,

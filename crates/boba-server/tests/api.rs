@@ -2221,3 +2221,117 @@ async fn shared_runner_with_a_subscription_is_refused() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn connector_secrets_never_reach_a_members_personal_runner() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let (s, conn) = srv
+        .post(
+            &owner,
+            "/connectors",
+            json!({"name": "sentry", "kind": "sentry",
+            "transport": {"type": "stdio", "command": "npx", "args": ["sentry-mcp"]},
+            "secrets": {"SENTRY_TOKEN": "s3cr3t-token-value"}}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{conn}");
+    let qa = agent(&snap, "Golden QA").id;
+    let dev = agent(&snap, "Boba Dev").id;
+    for a in [qa, dev] {
+        let (s, v) = srv
+            .req(
+                &owner,
+                "PATCH",
+                &format!("/agents/{a}"),
+                Some(json!({"connector_ids": [conn["id"]]})),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+    }
+    let (_, repo) = srv
+        .post(
+            &owner,
+            "/repos",
+            json!({"name": "app", "path": "/srv/app", "remote_url": "https://github.com/acme/app"}),
+        )
+        .await;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/tabs/{}", snap.tabs[0].id),
+        Some(json!({"repo_id": repo["id"]})),
+    )
+    .await;
+
+    // The member's own machine: the run starts, without the connector.
+    let (_, v) = srv
+        .post(
+            &member,
+            "/runners",
+            json!({"name": "mbp", "scope": "personal"}),
+        )
+        .await;
+    let mut ws = runner_connect(&srv, v["token"].as_str().unwrap())
+        .await
+        .unwrap();
+    runner_send(&mut ws, hello("subscription")).await;
+    let rid = v["runner"]["id"].clone();
+    srv.until(&owner, "online", |s| {
+        s.runners.iter().any(|r| json!(r.id) == rid && r.online)
+    })
+    .await;
+    let t = snap.tickets[0].id;
+    let (_, run) = srv
+        .post(
+            &member,
+            &format!("/tickets/{t}/assign"),
+            json!({"agent_id": qa}),
+        )
+        .await;
+    let start = runner_recv(&mut ws).await.unwrap();
+    assert_eq!(start["spec"]["mcp_servers"], json!([]));
+    assert!(
+        !start.to_string().contains("s3cr3t"),
+        "secret leaked to a personal runner"
+    );
+    let (_, logs) = srv
+        .get(
+            &member,
+            &format!("/runs/{}/logs", run["id"].as_str().unwrap()),
+        )
+        .await;
+    assert!(logs.as_array().unwrap().iter().any(|l| l["text"]
+        .as_str()
+        .unwrap()
+        .contains("Connector sentry is not available")));
+
+    // The built-in runner (server side) still gets it.
+    let t2 = snap.tickets[1].id;
+    srv.post(
+        &owner,
+        &format!("/tickets/{t2}/assign"),
+        json!({"agent_id": dev}),
+    )
+    .await;
+    srv.until(&owner, "dev ran", |s| {
+        s.runs.iter().any(|r| r.ticket_id == Some(t2))
+    })
+    .await;
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.ticket.as_ref().is_some_and(|x| x.id == t2))
+        .unwrap();
+    assert_eq!(spec.mcp_servers.len(), 1);
+    assert_eq!(
+        spec.mcp_servers[0]
+            .secrets
+            .get("SENTRY_TOKEN")
+            .map(String::as_str),
+        Some("s3cr3t-token-value")
+    );
+}
