@@ -65,19 +65,24 @@ fn key() -> anyhow::Result<&'static [u8; 32]> {
     if let Some(k) = KEY.get() {
         return Ok(k);
     }
-    let dir = std::env::var("BOBA_DATA_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("data"));
+    let dir = std::env::var("BOBA_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("data"));
     init_secret_key(&dir)?;
     KEY.get().ok_or_else(|| anyhow!("secret key unavailable"))
 }
 
 fn load_or_create_key(data_dir: &Path) -> anyhow::Result<[u8; 32]> {
     if let Ok(v) = std::env::var("BOBA_SECRET_KEY") {
-        return parse_key(v.trim()).context("BOBA_SECRET_KEY must be 32 bytes as 64 hex chars or base64");
+        return parse_key(v.trim())
+            .context("BOBA_SECRET_KEY must be 32 bytes as 64 hex chars or base64");
     }
     let path = data_dir.join("secret.key");
     if path.exists() {
-        let raw = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-        return parse_key(raw.trim()).with_context(|| format!("{} is not a valid key", path.display()));
+        let raw = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        return parse_key(raw.trim())
+            .with_context(|| format!("{} is not a valid key", path.display()));
     }
     std::fs::create_dir_all(data_dir)?;
     let key: [u8; 32] = Aes256Gcm::generate_key(OsRng).into();
@@ -92,7 +97,9 @@ fn parse_key(s: &str) -> anyhow::Result<[u8; 32]> {
     } else {
         B64.decode(s)?
     };
-    bytes.try_into().map_err(|_| anyhow!("key must be exactly 32 bytes"))
+    bytes
+        .try_into()
+        .map_err(|_| anyhow!("key must be exactly 32 bytes"))
 }
 
 fn write_private(path: &Path, data: &[u8]) -> anyhow::Result<()> {
@@ -100,7 +107,11 @@ fn write_private(path: &Path, data: &[u8]) -> anyhow::Result<()> {
     {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)?;
         f.write_all(data)?;
         Ok(())
     }
@@ -114,7 +125,9 @@ fn write_private(path: &Path, data: &[u8]) -> anyhow::Result<()> {
 fn encrypt(plain: &str) -> anyhow::Result<String> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key()?));
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-    let ct = cipher.encrypt(&nonce, plain.as_bytes()).map_err(|_| anyhow!("encryption failed"))?;
+    let ct = cipher
+        .encrypt(&nonce, plain.as_bytes())
+        .map_err(|_| anyhow!("encryption failed"))?;
     let mut out = nonce.to_vec();
     out.extend_from_slice(&ct);
     Ok(B64.encode(out))
@@ -127,9 +140,9 @@ fn decrypt(stored: &str) -> anyhow::Result<String> {
     }
     let (nonce, ct) = raw.split_at(12);
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key()?));
-    let plain = cipher
-        .decrypt(Nonce::from_slice(nonce), ct)
-        .map_err(|_| anyhow!("cannot decrypt a connector secret: was BOBA_SECRET_KEY / secret.key changed?"))?;
+    let plain = cipher.decrypt(Nonce::from_slice(nonce), ct).map_err(|_| {
+        anyhow!("cannot decrypt a connector secret: was BOBA_SECRET_KEY / secret.key changed?")
+    })?;
     Ok(String::from_utf8(plain)?)
 }
 
@@ -141,19 +154,21 @@ fn row_to_connector(row: &SqliteRow, secret_keys: Vec<String>) -> anyhow::Result
         id: Id::parse_str(row.try_get::<String, _>("id")?.as_str())?,
         name: row.try_get("name")?,
         kind: dec(row.try_get::<String, _>("kind")?.as_str())?,
-        transport: dec(row.try_get::<String, _>("transport")?.as_str())?,
+        transport: serde_json::from_str(row.try_get::<String, _>("transport")?.as_str())?,
         secret_keys,
-        allowed_tools: dec(row.try_get::<String, _>("allowed_tools")?.as_str())?,
+        allowed_tools: serde_json::from_str(row.try_get::<String, _>("allowed_tools")?.as_str())?,
         created_by: created_by.map(|s| Id::parse_str(&s)).transpose()?,
         created_at: parse_ts(row.try_get::<String, _>("created_at")?.as_str())?,
     })
 }
 
 async fn secret_keys(db: &Db, cid: Id) -> anyhow::Result<Vec<String>> {
-    Ok(sqlx::query_scalar("SELECT key FROM connector_secrets WHERE connector_id = ? ORDER BY key")
-        .bind(cid.to_string())
-        .fetch_all(&db.pool)
-        .await?)
+    Ok(
+        sqlx::query_scalar("SELECT key FROM connector_secrets WHERE connector_id = ? ORDER BY key")
+            .bind(cid.to_string())
+            .fetch_all(&db.pool)
+            .await?,
+    )
 }
 
 async fn secret_values(db: &Db, cid: Id) -> anyhow::Result<BTreeMap<String, String>> {
@@ -172,7 +187,9 @@ async fn secret_values(db: &Db, cid: Id) -> anyhow::Result<BTreeMap<String, Stri
 
 /// All connectors (secret names only), for the snapshot.
 pub async fn list(db: &Db) -> anyhow::Result<Vec<Connector>> {
-    let rows = sqlx::query("SELECT * FROM connectors ORDER BY name").fetch_all(&db.pool).await?;
+    let rows = sqlx::query("SELECT * FROM connectors ORDER BY name")
+        .fetch_all(&db.pool)
+        .await?;
     let mut out = Vec::with_capacity(rows.len());
     for r in &rows {
         let id = Id::parse_str(r.try_get::<String, _>("id")?.as_str())?;
@@ -192,7 +209,11 @@ pub async fn get(db: &Db, cid: Id) -> anyhow::Result<Option<Connector>> {
     Ok(Some(row_to_connector(&r, secret_keys(db, cid).await?)?))
 }
 
-async fn save(db: &Db, c: &Connector, secrets: Option<&BTreeMap<String, String>>) -> anyhow::Result<()> {
+async fn save(
+    db: &Db,
+    c: &Connector,
+    secrets: Option<&BTreeMap<String, String>>,
+) -> anyhow::Result<()> {
     let mut tx = db.pool.begin().await?;
     sqlx::query(
         "INSERT INTO connectors(id, name, kind, transport, allowed_tools, created_by, created_at)
@@ -203,8 +224,8 @@ async fn save(db: &Db, c: &Connector, secrets: Option<&BTreeMap<String, String>>
     .bind(c.id.to_string())
     .bind(&c.name)
     .bind(enc(&c.kind))
-    .bind(enc(&c.transport))
-    .bind(enc(&c.allowed_tools))
+    .bind(serde_json::to_string(&c.transport)?)
+    .bind(serde_json::to_string(&c.allowed_tools)?)
     .bind(c.created_by.map(|i| i.to_string()))
     .bind(ts(c.created_at))
     .execute(&mut *tx)
@@ -292,13 +313,19 @@ fn valid_secret_key(k: &str) -> bool {
         && k.len() <= 64
 }
 
-fn validate(name: &str, transport: &McpTransport, secrets: &BTreeMap<String, String>) -> AppResult<()> {
+fn validate(
+    name: &str,
+    transport: &McpTransport,
+    secrets: &BTreeMap<String, String>,
+) -> AppResult<()> {
     if name.trim().is_empty() || name.len() > 60 {
         return Err(AppError::bad("connector name must be 1-60 characters"));
     }
     for k in secrets.keys() {
         if !valid_secret_key(k) {
-            return Err(AppError::bad(format!("secret name {k:?} must look like an env var: UPPER_SNAKE_CASE")));
+            return Err(AppError::bad(format!(
+                "secret name {k:?} must look like an env var: UPPER_SNAKE_CASE"
+            )));
         }
     }
     match transport {
@@ -310,7 +337,9 @@ fn validate(name: &str, transport: &McpTransport, secrets: &BTreeMap<String, Str
         McpTransport::Http { url, .. } => {
             let ok = url.starts_with("https://") || url.starts_with("http://");
             if !ok {
-                return Err(AppError::bad("HTTP connector URL must start with http:// or https://"));
+                return Err(AppError::bad(
+                    "HTTP connector URL must start with http:// or https://",
+                ));
             }
         }
     }
@@ -321,7 +350,9 @@ fn check_header_secrets(transport: &McpTransport, known: &HashSet<String>) -> Ap
     if let McpTransport::Http { header_secrets, .. } = transport {
         for (h, k) in header_secrets {
             if !known.contains(k) {
-                return Err(AppError::bad(format!("header {h} refers to unknown secret {k}")));
+                return Err(AppError::bad(format!(
+                    "header {h} refers to unknown secret {k}"
+                )));
             }
         }
     }
@@ -340,7 +371,11 @@ pub async fn create(
     Json(req): Json<CreateConnector>,
 ) -> AppResult<Json<Connector>> {
     let user = me.require(Permission::ManageAutomations)?.clone();
-    let secrets: BTreeMap<String, String> = req.secrets.into_iter().filter(|(_, v)| !v.is_empty()).collect();
+    let secrets: BTreeMap<String, String> = req
+        .secrets
+        .into_iter()
+        .filter(|(_, v)| !v.is_empty())
+        .collect();
     validate(&req.name, &req.transport, &secrets)?;
     check_header_secrets(&req.transport, &secrets.keys().cloned().collect())?;
     let mut c = Connector {
@@ -361,7 +396,12 @@ pub async fn create(
             HistoryKind::ConnectorCreated,
             Actor::User(user.id),
             Refs::default(),
-            format!("{} added the {} connector \"{}\"", user.name, kind_label(c.kind), c.name),
+            format!(
+                "{} added the {} connector \"{}\"",
+                user.name,
+                kind_label(c.kind),
+                c.name
+            ),
             None,
         )
         .await;
@@ -375,7 +415,9 @@ pub async fn update(
     Json(req): Json<UpdateConnector>,
 ) -> AppResult<Json<Connector>> {
     let user = me.require(Permission::ManageAutomations)?.clone();
-    let mut c = get(&state.db, id).await?.ok_or(AppError::NotFound("connector"))?;
+    let mut c = get(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound("connector"))?;
     if let Some(n) = req.name {
         c.name = n.trim().to_string();
     }
@@ -386,10 +428,20 @@ pub async fn update(
         c.allowed_tools = a;
     }
     let patch = req.secrets.unwrap_or_default();
-    validate(&c.name, &c.transport, &patch.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k.clone(), v.clone())).collect())?;
+    validate(
+        &c.name,
+        &c.transport,
+        &patch
+            .iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    )?;
     for k in patch.keys() {
         if !valid_secret_key(k) {
-            return Err(AppError::bad(format!("secret name {k:?} must look like an env var: UPPER_SNAKE_CASE")));
+            return Err(AppError::bad(format!(
+                "secret name {k:?} must look like an env var: UPPER_SNAKE_CASE"
+            )));
         }
     }
     let mut known: HashSet<String> = c.secret_keys.iter().cloned().collect();
@@ -402,7 +454,9 @@ pub async fn update(
     }
     check_header_secrets(&c.transport, &known)?;
     save(&state.db, &c, Some(&patch)).await?;
-    let c = get(&state.db, id).await?.ok_or(AppError::NotFound("connector"))?;
+    let c = get(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound("connector"))?;
     state.upsert(Entity::Connector(c.clone()));
     state
         .record(
@@ -422,7 +476,9 @@ pub async fn delete(
     UrlPath(id): UrlPath<Id>,
 ) -> AppResult<StatusCode> {
     let user = me.require(Permission::ManageAutomations)?.clone();
-    let c = get(&state.db, id).await?.ok_or(AppError::NotFound("connector"))?;
+    let c = get(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound("connector"))?;
     sqlx::query("DELETE FROM connectors WHERE id = ?")
         .bind(id.to_string())
         .execute(&state.db.pool)
@@ -447,11 +503,22 @@ pub async fn test(
     UrlPath(id): UrlPath<Id>,
 ) -> AppResult<Json<ConnectorTestResult>> {
     me.require(Permission::ManageAutomations)?;
-    let c = get(&state.db, id).await?.ok_or(AppError::NotFound("connector"))?;
+    let c = get(&state.db, id)
+        .await?
+        .ok_or(AppError::NotFound("connector"))?;
     let secrets = secret_values(&state.db, id).await?;
-    let result = match tokio::time::timeout(TEST_TIMEOUT, list_tools(&c.transport, &secrets)).await {
-        Ok(Ok(tools)) => ConnectorTestResult { ok: true, tools, error: None },
-        Ok(Err(e)) => ConnectorTestResult { ok: false, tools: vec![], error: Some(redact(&format!("{e:#}"), &secrets)) },
+    let result = match tokio::time::timeout(TEST_TIMEOUT, list_tools(&c.transport, &secrets)).await
+    {
+        Ok(Ok(tools)) => ConnectorTestResult {
+            ok: true,
+            tools,
+            error: None,
+        },
+        Ok(Err(e)) => ConnectorTestResult {
+            ok: false,
+            tools: vec![],
+            error: Some(redact(&format!("{e:#}"), &secrets)),
+        },
         Err(_) => ConnectorTestResult {
             ok: false,
             tools: vec![],
@@ -494,20 +561,33 @@ fn tool_names(result: &Value) -> anyhow::Result<Vec<String>> {
         .pointer("/result/tools")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow!("tools/list answer has no tools array"))?;
-    let mut names: Vec<String> = tools.iter().filter_map(|t| t.get("name")?.as_str().map(String::from)).collect();
+    let mut names: Vec<String> = tools
+        .iter()
+        .filter_map(|t| t.get("name")?.as_str().map(String::from))
+        .collect();
     names.sort();
     Ok(names)
 }
 
 /// Start/contact the MCP server, perform the handshake and return its tool names.
-pub async fn list_tools(transport: &McpTransport, secrets: &BTreeMap<String, String>) -> anyhow::Result<Vec<String>> {
+pub async fn list_tools(
+    transport: &McpTransport,
+    secrets: &BTreeMap<String, String>,
+) -> anyhow::Result<Vec<String>> {
     match transport {
         McpTransport::Stdio { command, args } => stdio_list_tools(command, args, secrets).await,
-        McpTransport::Http { url, header_secrets } => http_list_tools(url, header_secrets, secrets).await,
+        McpTransport::Http {
+            url,
+            header_secrets,
+        } => http_list_tools(url, header_secrets, secrets).await,
     }
 }
 
-async fn stdio_list_tools(command: &str, args: &[String], secrets: &BTreeMap<String, String>) -> anyhow::Result<Vec<String>> {
+async fn stdio_list_tools(
+    command: &str,
+    args: &[String],
+    secrets: &BTreeMap<String, String>,
+) -> anyhow::Result<Vec<String>> {
     let mut child = tokio::process::Command::new(command)
         .args(args)
         .envs(secrets)
@@ -518,16 +598,22 @@ async fn stdio_list_tools(command: &str, args: &[String], secrets: &BTreeMap<Str
         .spawn()
         .with_context(|| format!("cannot start {command}"))?;
     let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
-    let mut lines = BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?).lines();
+    let mut lines =
+        BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?).lines();
 
     async fn send(stdin: &mut tokio::process::ChildStdin, v: &Value) -> anyhow::Result<()> {
         stdin.write_all(format!("{v}\n").as_bytes()).await?;
         stdin.flush().await?;
         Ok(())
     }
-    async fn wait_for(lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>, id: u64) -> anyhow::Result<Value> {
+    async fn wait_for(
+        lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+        id: u64,
+    ) -> anyhow::Result<Value> {
         while let Some(line) = lines.next_line().await? {
-            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
             if v.get("id").and_then(Value::as_u64) == Some(id) {
                 return Ok(v);
             }
@@ -540,18 +626,27 @@ async fn stdio_list_tools(command: &str, args: &[String], secrets: &BTreeMap<Str
     if let Some(err) = init.get("error") {
         bail!("initialize failed: {err}");
     }
-    send(&mut stdin, &json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await?;
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+    )
+    .await?;
     send(&mut stdin, &rpc(2, "tools/list", json!({}))).await?;
     let tools = tool_names(&wait_for(&mut lines, 2).await?);
     let _ = child.kill().await;
     tools
 }
 
-fn header_values(header_secrets: &BTreeMap<String, String>, secrets: &BTreeMap<String, String>) -> anyhow::Result<Vec<(String, String)>> {
+fn header_values(
+    header_secrets: &BTreeMap<String, String>,
+    secrets: &BTreeMap<String, String>,
+) -> anyhow::Result<Vec<(String, String)>> {
     header_secrets
         .iter()
         .map(|(h, k)| {
-            let v = secrets.get(k).ok_or_else(|| anyhow!("secret {k} is not set"))?;
+            let v = secrets
+                .get(k)
+                .ok_or_else(|| anyhow!("secret {k} is not set"))?;
             let v = if h.eq_ignore_ascii_case("authorization") && !v.contains(' ') {
                 format!("Bearer {v}")
             } else {
@@ -585,7 +680,9 @@ async fn http_list_tools(
     header_secrets: &BTreeMap<String, String>,
     secrets: &BTreeMap<String, String>,
 ) -> anyhow::Result<Vec<String>> {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
     let headers = header_values(header_secrets, secrets)?;
     let mut session: Option<String> = None;
     let post = |session: &Option<String>, body: Value| {
@@ -604,24 +701,47 @@ async fn http_list_tools(
         req
     };
 
-    let resp = post(&session, rpc(1, "initialize", initialize_params())).send().await?;
+    let resp = post(&session, rpc(1, "initialize", initialize_params()))
+        .send()
+        .await?;
     let status = resp.status();
     if !status.is_success() {
         bail!("initialize returned HTTP {status}");
     }
-    session = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()).map(String::from);
-    let ct = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    session = resp
+        .headers()
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let init = parse_http_answer(&ct, &resp.text().await?, 1)?;
     if let Some(err) = init.get("error") {
         bail!("initialize failed: {err}");
     }
-    let _ = post(&session, json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).send().await;
-    let resp = post(&session, rpc(2, "tools/list", json!({}))).send().await?;
+    let _ = post(
+        &session,
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+    )
+    .send()
+    .await;
+    let resp = post(&session, rpc(2, "tools/list", json!({})))
+        .send()
+        .await?;
     let status = resp.status();
     if !status.is_success() {
         bail!("tools/list returned HTTP {status}");
     }
-    let ct = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     tool_names(&parse_http_answer(&ct, &resp.text().await?, 2)?)
 }
 
@@ -665,7 +785,10 @@ mod tests {
     fn server_names_are_unique_and_avoid_boba() {
         let mut taken = HashSet::from([BOARD_SERVER_NAME.to_string()]);
         assert_eq!(server_name("Search Console", &mut taken), "search_console");
-        assert_eq!(server_name("search-console", &mut taken), "search_console_2");
+        assert_eq!(
+            server_name("search-console", &mut taken),
+            "search_console_2"
+        );
         assert_eq!(server_name("Boba", &mut taken), "boba_ext");
         assert_eq!(server_name("!!!", &mut taken), "connector");
     }
@@ -687,7 +810,10 @@ mod tests {
 
     #[test]
     fn authorization_header_gets_bearer() {
-        let hs = BTreeMap::from([("Authorization".to_string(), "TOKEN".to_string()), ("X-Key".to_string(), "TOKEN".to_string())]);
+        let hs = BTreeMap::from([
+            ("Authorization".to_string(), "TOKEN".to_string()),
+            ("X-Key".to_string(), "TOKEN".to_string()),
+        ]);
         let s = BTreeMap::from([("TOKEN".to_string(), "abc".to_string())]);
         let v = header_values(&hs, &s).unwrap();
         assert!(v.contains(&("Authorization".into(), "Bearer abc".into())));
@@ -712,7 +838,10 @@ mod tests {
 done"#;
         let secrets = BTreeMap::from([("TOKEN".to_string(), "xyz".to_string())]);
         let tools = list_tools(
-            &McpTransport::Stdio { command: "sh".into(), args: vec!["-c".into(), script.into()] },
+            &McpTransport::Stdio {
+                command: "sh".into(),
+                args: vec!["-c".into(), script.into()],
+            },
             &secrets,
         )
         .await

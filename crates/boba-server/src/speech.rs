@@ -42,7 +42,9 @@ fn is_whisper_cpp(url: &str) -> bool {
 }
 
 fn extract_text(v: &Value) -> Option<String> {
-    v.get("text").and_then(Value::as_str).map(|s| s.trim().to_string())
+    v.get("text")
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_string())
 }
 
 pub async fn transcribe(
@@ -56,7 +58,9 @@ pub async fn transcribe(
     let url = match settings.speech {
         SpeechProvider::Whisper { url } => url,
         SpeechProvider::Browser => {
-            return Err(AppError::bad("speech is transcribed in the browser for this workspace"))
+            return Err(AppError::bad(
+                "speech is transcribed in the browser for this workspace",
+            ))
         }
         SpeechProvider::Disabled => return Err(AppError::bad("voice commands are disabled")),
     };
@@ -91,17 +95,28 @@ pub async fn transcribe(
         .timeout(TIMEOUT)
         .build()
         .map_err(anyhow::Error::from)?;
-    let resp = client.post(&url).multipart(form).send().await.map_err(|e| {
-        tracing::warn!(error = %e, "whisper request failed");
-        AppError::Internal(anyhow::anyhow!("speech server unreachable"))
-    })?;
+    let resp = client
+        .post(&url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "whisper request failed");
+            AppError::Internal(anyhow::anyhow!("speech server unreachable"))
+        })?;
     let status = resp.status();
     if !status.is_success() {
         tracing::warn!(%status, "whisper server returned an error");
-        return Err(AppError::Internal(anyhow::anyhow!("speech server returned HTTP {status}")));
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "speech server returned HTTP {status}"
+        )));
     }
-    let v: Value = resp.json().await.map_err(|e| AppError::Internal(anyhow::anyhow!("bad speech server answer: {e}")))?;
-    let text = extract_text(&v).ok_or_else(|| AppError::Internal(anyhow::anyhow!("speech server answer has no text")))?;
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("bad speech server answer: {e}")))?;
+    let text = extract_text(&v)
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("speech server answer has no text")))?;
     Ok(Json(Transcript { text }))
 }
 
@@ -121,12 +136,17 @@ mod tests {
     fn detects_server_shape() {
         assert!(is_whisper_cpp("http://127.0.0.1:8080/inference"));
         assert!(is_whisper_cpp("http://127.0.0.1:8080/inference/"));
-        assert!(!is_whisper_cpp("http://127.0.0.1:8000/v1/audio/transcriptions"));
+        assert!(!is_whisper_cpp(
+            "http://127.0.0.1:8000/v1/audio/transcriptions"
+        ));
     }
 
     #[test]
     fn extracts_text() {
-        assert_eq!(extract_text(&serde_json::json!({"text": "  hello boba \n"})).as_deref(), Some("hello boba"));
+        assert_eq!(
+            extract_text(&serde_json::json!({"text": "  hello boba \n"})).as_deref(),
+            Some("hello boba")
+        );
         assert_eq!(extract_text(&serde_json::json!({"segments": []})), None);
     }
 }

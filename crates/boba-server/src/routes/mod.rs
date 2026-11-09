@@ -68,7 +68,8 @@ pub fn api() -> Router<SharedState> {
         .route("/connectors/{id}/test", post(crate::connectors::test))
         .route(
             "/speech/transcribe",
-            post(crate::speech::transcribe)
-                .layer(axum::extract::DefaultBodyLimit::max(crate::speech::MAX_AUDIO_BYTES)),
+            post(crate::speech::transcribe).layer(axum::extract::DefaultBodyLimit::max(
+                crate::speech::MAX_AUDIO_BYTES,
+            )),
         )
 }
