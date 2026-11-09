@@ -41,6 +41,8 @@ import { HistoryDrawer } from './panels/HistoryDrawer';
 import { SkillsDrawer } from './panels/SkillsDrawer';
 import { TicketPanel } from './panels/TicketPanel';
 import { Tavern } from './tavern/Tavern';
+import { MembersModal, ProfileModal } from './team/Account';
+import { RunnersPage } from './team/Runners';
 import { CommandBar } from './command/CommandBar';
 import { Integrations } from './integrations/Integrations';
 import { PortalEditor, Portals } from './integrations/Portals';
@@ -110,9 +112,10 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
   }, [ready]);
   const panelTicket = ui.panel?.kind === 'ticket' ? useBoard.getState().tickets[ui.panel.id] : undefined;
   useEffect(() => {
+    if (!ready) return;
     const next = panelTicket ? `#/t/${panelTicket.number}` : '';
     if (location.hash !== next) history.replaceState(null, '', `${location.pathname}${location.search}${next}`);
-  }, [panelTicket]);
+  }, [panelTicket, ready]);
 
   // Reduced motion class.
   useEffect(() => {
@@ -281,7 +284,9 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
         <Header activeTab={activeTab} onLoggedOut={onLoggedOut} />
         <div className={`game-main ${prefs.tavernCollapsed ? 'tavern-collapsed' : ''}`}>
           <Tavern />
-          {ui.view === 'quests' ? (
+          {ui.view === 'runners' ? (
+            <RunnersPage />
+          ) : ui.view === 'quests' ? (
             <QuestBoard />
           ) : ui.view === 'integrations' ? (
             <Integrations />
@@ -305,7 +310,7 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
       <DragOverlay dropAnimation={drag?.type === 'agent' ? null : undefined}>{overlay}</DragOverlay>
 
       <AnimatePresence>
-        {ui.panel?.kind === 'ticket' && <TicketPanel key={`t-${ui.panel.id}`} ticketId={ui.panel.id} initialView={ui.panel.view} />}
+        {ui.panel?.kind === 'ticket' && <TicketPanel key={`t-${ui.panel.id}-${ui.panel.commentId ?? ''}-${ui.panel.runId ?? ''}`} ticketId={ui.panel.id} initialView={ui.panel.view} commentId={ui.panel.commentId} runId={ui.panel.runId} />}
         {ui.panel?.kind === 'agent' && <AgentPanel key={`a-${ui.panel.id}`} agentId={ui.panel.id} />}
         {ui.panel?.kind === 'history' && <HistoryDrawer key="history" />}
         {ui.panel?.kind === 'skills' && <SkillsDrawer key="skills" initialId={ui.panel.id} />}
@@ -323,6 +328,8 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
       {modal?.kind === 'quest-edit' && <QuestEditor jobId={modal.id} />}
       {modal?.kind === 'portal-new' && <PortalEditor presetKind={modal.preset} />}
       {modal?.kind === 'portal-edit' && <PortalEditor connectorId={modal.id} />}
+      {modal?.kind === 'profile' && <ProfileModal />}
+      {modal?.kind === 'members' && <MembersModal />}
       <CommandBar />
 
       <FxLayer />

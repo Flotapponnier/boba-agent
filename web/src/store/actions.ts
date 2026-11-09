@@ -52,9 +52,19 @@ export async function assignAgent(agentId: string, ticketId: string, via: 'drag'
     sfx('blocked');
     fxBus.emit({ fx: 'blocked', agent_id: a.id });
   });
-  if (run) up({ entity: 'run', data: run });
+  if (run) {
+    up({ entity: 'run', data: run });
+    const st2 = useBoard.getState();
+    const r = run.runner_id ? st2.runners[run.runner_id] : undefined;
+    const mine = Object.values(st2.runners).some((x) => x.scope === 'personal' && x.owner_user_id === st2.me?.id);
+    if (r && (r.auth === 'demo' || r.auth === 'unknown') && !mine && !simHintShown) {
+      simHintShown = true;
+      setTimeout(() => toast('🎭 Simulated run. Connect your own Claude Code (account menu → Connect) to run it for real.', 'info'), 900);
+    }
+  }
   return run;
 }
+let simHintShown = false;
 
 export async function createTicket(b: CreateTicket) {
   const t = await attempt(() => api.createTicket(b));

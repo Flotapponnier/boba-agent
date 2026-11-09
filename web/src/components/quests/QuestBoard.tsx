@@ -13,6 +13,7 @@ import { Markdown } from '../ui/Markdown';
 import { Drawer } from '../ui/Overlay';
 import { Sprite } from '../ui/Sprite';
 import { RunView, STATUS_LABEL } from '../panels/RunView';
+import { Discussion } from '../comments/Comments';
 
 export const OUTPUT_LABEL: Record<JobOutput, { icon: string; label: string }> = {
   tickets: { icon: '📋', label: 'Files tickets' },
@@ -236,7 +237,7 @@ export function QuestPanel({ jobId }: { jobId: string }) {
           </>
         )}
         <div className="section-title">RUNS ({j.runs_count})</div>
-        {runs.length === 0 && <p className="muted">No run on record yet.</p>}
+        {runs.length === 0 && <p className="muted">{j.runs_count ? 'Older runs are not loaded on this board. The next one will show up here live.' : 'No run on record yet.'}</p>}
         <div className="round-picker" style={{ flexWrap: 'wrap' }}>
           {runs.slice(0, 20).map((r) => (
             <button key={r.id} aria-pressed={run?.id === r.id} onClick={() => setSel(r.id)} title={STATUS_LABEL[r.status]}>
@@ -249,6 +250,8 @@ export function QuestPanel({ jobId }: { jobId: string }) {
             <RunView key={run.id} run={run} onSwitchRun={setSel} />
           </div>
         )}
+        <div className="section-title">QUEST DISCUSSION</div>
+        <Discussion jobId={j.id} />
       </div>
     </Drawer>
   );

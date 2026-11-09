@@ -1,4 +1,4 @@
-import type { CommandPlan, Fx } from '../api/types';
+import type { CommandPlan, Fx, Notification } from '../api/types';
 
 type Listener<T> = (v: T) => void;
 
@@ -35,6 +35,7 @@ export type LocalFx =
 export const fxBus = channel<LocalFx>();
 export const toastBus = channel<ToastMsg>();
 export const planBus = channel<CommandPlan>();
+export const notifyBus = channel<Notification>();
 
 let toastSeq = 0;
 export function toast(text: string, tone: ToastTone = 'info', sprite?: string) {

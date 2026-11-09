@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 export type Panel =
-  | { kind: 'ticket'; id: string; view?: 'live' | 'details' | 'history' }
+  | { kind: 'ticket'; id: string; view?: 'live' | 'details' | 'history' | 'discussion'; commentId?: string; runId?: string }
   | { kind: 'agent'; id: string }
   | { kind: 'history' }
   | { kind: 'skills'; id?: string }
@@ -19,9 +19,11 @@ export type Modal =
   | { kind: 'quest-edit'; id: string }
   | { kind: 'portal-new'; preset?: string }
   | { kind: 'portal-edit'; id: string }
-  | { kind: 'repo-new' };
+  | { kind: 'repo-new' }
+  | { kind: 'profile' }
+  | { kind: 'members' };
 
-export type View = 'board' | 'quests' | 'integrations' | 'portals';
+export type View = 'board' | 'quests' | 'integrations' | 'portals' | 'runners';
 
 interface UiState {
   view: View;

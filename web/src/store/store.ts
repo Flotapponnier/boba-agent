@@ -22,7 +22,7 @@ import type {
   WorkspaceSettings,
   WorkspaceStats,
 } from '../api/types';
-import { fxBus, planBus, toast } from './bus';
+import { fxBus, notifyBus, planBus, toast } from './bus';
 
 export type ConnState = 'idle' | 'connecting' | 'online' | 'offline';
 
@@ -79,6 +79,7 @@ export interface BoardState extends EntityMaps {
   remove(kind: EntityKind, id: string): void;
   mergeLogs(runId: string, lines: RunLogLine[]): void;
   mergeHistory(events: HistoryEvent[]): void;
+  mergeComments(cs: Comment[]): void;
   reset(): void;
 }
 
@@ -131,6 +132,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
       runners: byId(s.runners),
       jobs: byId(s.jobs ?? []),
       connectors: byId(s.connectors ?? []),
+      notifications: byId(s.notifications ?? []),
       history: s.history,
       settings: s.settings,
       stats: s.stats,
@@ -141,6 +143,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     set((st) => {
       const k = KEY[item.entity];
       const data = item.data as { id: string };
+      if (item.entity === 'notification' && !st.notifications[item.data.id] && !item.data.read) {
+        const n = item.data;
+        queueMicrotask(() => notifyBus.emit(n));
+      }
       if (item.entity === 'job') {
         const prev = st.jobs[item.data.id];
         if (prev && item.data.runs_count > prev.runs_count) queueMicrotask(() => fxBus.emit({ fx: 'quest_done', job_id: item.data.id }));
@@ -172,6 +178,15 @@ export const useBoard = create<BoardState>()((set, get) => ({
       const all = [...fresh, ...st.history].sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
       return { history: all.slice(0, 500), historyTick: st.historyTick + 1 };
     }),
+
+  mergeComments: (cs) => {
+    if (!cs.length) return;
+    set((st) => {
+      const next = { ...st.comments };
+      for (const c of cs) next[c.id] = c;
+      return { comments: next };
+    });
+  },
 
   apply: (msg) => {
     const st = get();

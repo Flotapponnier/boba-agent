@@ -23,6 +23,8 @@ export interface MockUser extends User {
 }
 
 export interface MockState {
+  comments: import('../api/types').Comment[];
+  notifications: import('../api/types').Notification[];
   jobs: import('../api/types').Job[];
   connectors: import('../api/types').Connector[];
   users: MockUser[];
@@ -133,13 +135,13 @@ export function seed(): MockState {
     name: 'You',
     email: 'owner@boba.local',
     role: 'owner',
-    avatar: 'boba',
+    avatar: 'boba_avatar',
     created_at: iso(10 * D),
     activated: true,
   };
-  const mika: MockUser = { id: 'u_mika', name: 'Mika', email: 'mika@boba.local', role: 'admin', avatar: 'pinky_boba', created_at: iso(8 * D), activated: true };
-  const sam: MockUser = { id: 'u_sam', name: 'Sam', email: 'sam@boba.local', role: 'member', avatar: 'golden_boba', created_at: iso(6 * D), activated: true };
-  const lou: MockUser = { id: 'u_lou', name: 'Lou', email: 'lou@boba.local', role: 'viewer', avatar: 'black_boba', created_at: iso(2 * D), activated: true };
+  const mika: MockUser = { id: 'u_mika', name: 'Mika', email: 'mika@boba.local', role: 'admin', avatar: 'pinky_boba_avatar', created_at: iso(8 * D), activated: true };
+  const sam: MockUser = { id: 'u_sam', name: 'Sam', email: 'sam@boba.local', role: 'member', avatar: 'golden_boba_avatar', created_at: iso(6 * D), activated: true };
+  const lou: MockUser = { id: 'u_lou', name: 'Lou', email: 'lou@boba.local', role: 'viewer', avatar: 'uncle_song', created_at: iso(2 * D), activated: true };
 
   const skills: Skill[] = [
     { id: 'sk_review', name: 'pr-review', description: 'Review a pull request and cite file:line for every finding.', source: 'boba', path: '/data/skills/pr-review', editable: true },
@@ -286,7 +288,23 @@ export function seed(): MockState {
       { id: 'r_site', name: 'boba-labs/site', path: '/srv/repos/site', remote_url: 'git@github.com:boba-labs/site.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
       { id: 'r_infra', name: 'boba-labs/infra', path: '/srv/repos/infra', remote_url: 'git@github.com:boba-labs/infra.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
     ],
-    runners: [{ id: 'local', name: 'local (this server)', online: true, max_concurrent_runs: 4, active_runs: 0, last_seen_at: iso(0), scope: 'shared', owner_user_id: null, auth: 'demo', host: 'boba-hq', claude_version: null }],
+    runners: [
+      { id: 'local', name: 'Demo runner', online: true, max_concurrent_runs: 4, active_runs: 0, last_seen_at: iso(0), scope: 'shared', owner_user_id: null, auth: 'demo', host: 'boba-hq', claude_version: null },
+      { id: 'rn_mika', name: "Mika's MacBook", online: true, max_concurrent_runs: 2, active_runs: 0, last_seen_at: iso(0), scope: 'personal', owner_user_id: 'u_mika', auth: 'subscription', host: 'mika-mbp', claude_version: '2.1.319' },
+      { id: 'rn_vps', name: 'vps-1', online: false, max_concurrent_runs: 6, active_runs: 0, last_seen_at: iso(3 * H), scope: 'shared', owner_user_id: null, auth: 'api_key', host: 'vps-1.boba-labs.dev', claude_version: '2.1.317' },
+    ],
+    comments: [
+      { id: 'cm_1', ticket_id: 'tk_2', job_id: null, anchor: { on: 'ticket_body', quote: 'Reproduce with a test first' }, parent_id: null, author_kind: 'user', author_id: 'u_mika', body: 'Use the EUR/TRY pair for the test, that is where the gap is the biggest. @[You](user:u_owner) can you confirm the expected fee?', mentioned_user_ids: ['u_owner'], mentioned_agent_ids: [], triggered_run_ids: [], reactions: [{ emoji: '👍', user_ids: ['u_sam'] }], resolved: false, resolved_by: null, created_at: iso(20 * H), edited_at: null, deleted: false },
+      { id: 'cm_2', ticket_id: 'tk_2', job_id: null, anchor: { on: 'ticket_body', quote: 'Reproduce with a test first' }, parent_id: 'cm_1', author_kind: 'user', author_id: 'u_sam', body: 'Expected is 0.12% of notional, rounded half-even.', mentioned_user_ids: [], mentioned_agent_ids: [], triggered_run_ids: [], reactions: [{ emoji: '🎉', user_ids: ['u_mika'] }], resolved: false, resolved_by: null, created_at: iso(19 * H), edited_at: null, deleted: false },
+      { id: 'cm_3', ticket_id: 'tk_2', job_id: null, anchor: { on: 'ticket' }, parent_id: null, author_kind: 'user', author_id: 'u_owner', body: 'Uncle is right, the zero-size case crashes in prod too. Priority bumped to urgent.', mentioned_user_ids: [], mentioned_agent_ids: [], triggered_run_ids: [], reactions: [{ emoji: '👀', user_ids: ['u_mika', 'u_sam'] }], resolved: false, resolved_by: null, created_at: iso(22 * H), edited_at: null, deleted: false },
+      { id: 'cm_4', ticket_id: 'tk_6', job_id: null, anchor: { on: 'ticket' }, parent_id: null, author_kind: 'user', author_id: 'u_mika', body: 'Shipped behind the flag, thanks bobas 🧋', mentioned_user_ids: [], mentioned_agent_ids: [], triggered_run_ids: [], reactions: [{ emoji: '🧋', user_ids: ['u_owner', 'u_sam'] }], resolved: true, resolved_by: 'u_owner', created_at: iso(60 * H), edited_at: null, deleted: false },
+    ],
+    notifications: [
+      { id: 'nt_1', user_id: 'u_owner', kind: 'mention', message: 'Mika mentioned you on T-2 Fee calculation bug', ticket_id: 'tk_2', comment_id: 'cm_1', run_id: null, job_id: null, actor_user_id: 'u_mika', actor_agent_id: null, read: false, created_at: iso(20 * H) },
+      { id: 'nt_2', user_id: 'u_owner', kind: 'reply', message: 'Sam replied in a thread on T-2', ticket_id: 'tk_2', comment_id: 'cm_2', run_id: null, job_id: null, actor_user_id: 'u_sam', actor_agent_id: null, read: false, created_at: iso(19 * H) },
+      { id: 'nt_3', user_id: 'u_owner', kind: 'review_verdict', message: 'Uncle Review requested changes on T-2 (PR #1201)', ticket_id: 'tk_2', comment_id: null, run_id: null, job_id: null, actor_user_id: null, actor_agent_id: 'a_uncle', read: true, created_at: iso(23.5 * H) },
+      { id: 'nt_4', user_id: 'u_owner', kind: 'job_result', message: 'Quest "Nightly dependency check" finished: 4 outdated packages', ticket_id: null, comment_id: null, run_id: null, job_id: 'job_deps', actor_user_id: null, actor_agent_id: 'a_black', read: true, created_at: iso(18 * H) },
+    ],
     history,
     settings: { name: 'Boba HQ', theme: 'sky', music_enabled_by_default: false, demo_mode: true, speech: { type: 'browser' } },
     stats: { pearls: 128, runs_completed: 47, prs_approved: 18, total_cost_usd: 23.41 },
