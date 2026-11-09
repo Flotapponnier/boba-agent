@@ -309,7 +309,8 @@ impl Srv {
     }
     /// Poll until `f(snapshot)` holds.
     async fn until(&self, c: &Client, what: &str, f: impl Fn(&Snapshot) -> bool) -> Snapshot {
-        for _ in 0..200 {
+        // Generous: CI and `cargo test` across the workspace run these in parallel.
+        for _ in 0..600 {
             let s = self.snapshot(c).await;
             if f(&s) {
                 return s;

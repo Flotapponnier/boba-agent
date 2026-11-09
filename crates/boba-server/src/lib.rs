@@ -71,6 +71,34 @@ pub fn router(state: SharedState) -> Router {
     app.with_state(state)
 }
 
+/// Graceful shutdown: cancel every live run (so no `claude` process outlives the server)
+/// and wait up to `grace` for the runner to confirm.
+pub async fn shutdown_runs(state: &SharedState, grace: Duration) {
+    let live: Vec<boba_core::Id> = state
+        .live
+        .lock()
+        .map(|l| l.iter().copied().collect())
+        .unwrap_or_default();
+    if live.is_empty() {
+        return;
+    }
+    tracing::info!(runs = live.len(), "cancelling live runs before exit");
+    for id in &live {
+        if let Err(e) = state.runner.cancel(*id).await {
+            tracing::warn!(error = ?e, run_id = %id, "cancel on shutdown");
+        }
+    }
+    let deadline = tokio::time::Instant::now() + grace;
+    while tokio::time::Instant::now() < deadline {
+        let left = state.live.lock().map(|l| l.len()).unwrap_or(0);
+        if left == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    state.flush_logs().await;
+}
+
 /// Background housekeeping: expired sessions.
 pub fn spawn_housekeeping(state: SharedState) {
     tokio::spawn(async move {

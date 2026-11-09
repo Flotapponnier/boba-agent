@@ -1,11 +1,12 @@
 //! `boba-agent`: the self-hosted Boba Agent server.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use boba_core::Id;
 use boba_runner::{DemoConfig, DemoRunner, Runner};
-use boba_server::{build, spawn_housekeeping, Config};
+use boba_server::{build, shutdown_runs, spawn_housekeeping, Config};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -35,14 +36,25 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = cfg.addr;
     let (state, app) = build(cfg, runner).await?;
-    spawn_housekeeping(state);
+    spawn_housekeeping(state.clone());
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
     tracing::info!("🧋 Boba Agent is ready on http://{addr}");
+    let on_signal = async move {
+        shutdown().await;
+        // Stop agents first: a killed server must not leave `claude` processes behind.
+        shutdown_runs(&state, Duration::from_secs(10)).await;
+        // Open WebSockets would keep a graceful shutdown waiting forever.
+        tokio::spawn(async {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            tracing::warn!("connections still open, exiting");
+            std::process::exit(0);
+        });
+    };
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown())
+        .with_graceful_shutdown(on_signal)
         .await?;
     Ok(())
 }
