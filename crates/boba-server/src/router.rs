@@ -81,9 +81,13 @@ impl Runners {
         &self.slots
     }
 
-    pub fn by_id(&self, id: Option<Id>) -> &RunnerSlot {
-        id.and_then(|id| self.slots.iter().find(|s| s.id() == id))
-            .unwrap_or(&self.slots[0])
+    /// The slot a run was routed to. `None` id (runs from before routing existed) means the
+    /// first shared runner: a personal slot is never a fallback.
+    pub fn by_id(&self, id: Option<Id>) -> Option<&RunnerSlot> {
+        match id {
+            Some(id) => self.slots.iter().find(|s| s.id() == id),
+            None => self.slots.iter().find(|s| s.scope == RunnerScope::Shared),
+        }
     }
 
     pub fn contains(&self, id: Id) -> bool {
@@ -111,14 +115,14 @@ impl Runners {
     /// 1. that human's personal runner,
     /// 2. a real shared runner,
     /// 3. a simulated shared runner,
-    /// 4. (no shared runner at all) the first slot.
+    /// 4. none: nothing may run it (the caller refuses the run).
     ///
     /// A personal runner is never used for anyone but its owner.
-    pub async fn route(&self, db: &Db, for_user: Option<Id>) -> &RunnerSlot {
+    pub async fn route(&self, db: &Db, for_user: Option<Id>) -> Option<&RunnerSlot> {
         if let Some(u) = for_user {
             for s in &self.slots {
                 if s.scope == RunnerScope::Personal && self.owner_id(db, s).await == Some(u) {
-                    return s;
+                    return Some(s);
                 }
             }
         }
@@ -126,7 +130,6 @@ impl Runners {
         shared()
             .find(|s| !s.simulated())
             .or_else(|| shared().next())
-            .unwrap_or(&self.slots[0])
     }
 
     /// Runner cards for the snapshot. `active` = running/waiting runs per runner id.

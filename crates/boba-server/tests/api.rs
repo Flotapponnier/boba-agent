@@ -1485,7 +1485,9 @@ async fn notifications_reach_only_their_owner() {
     srv.post(&member, "/notifications/read", json!({"ids": [theirs]}))
         .await;
     assert!(!srv.snapshot(&owner).await.notifications[0].read);
+}
 
+#[tokio::test]
 async fn subscription_runner_only_runs_its_owners_work() {
     use boba_core::team::{RunnerAuth, RunnerScope};
     // The owner's Claude subscription (personal) + a simulated shared runner.
@@ -1868,4 +1870,47 @@ async fn busy_agent_answers_why_it_cannot_start() {
         answer["body"].as_str().unwrap().contains("busy"),
         "{answer}"
     );
+}
+
+#[tokio::test]
+async fn personal_runner_is_never_a_fallback_for_others() {
+    use boba_core::team::{RunnerAuth, RunnerScope};
+    // Only the owner's subscription, no shared runner at all.
+    let personal = FakeRunner::new();
+    let mut slot = RunnerSlot::shared(Arc::new(personal.clone()), RunnerAuth::Subscription);
+    slot.scope = RunnerScope::Personal;
+    slot.owner_email = Some("owner@test.io".into());
+    let srv = start_with(tmp_dir(), Runners::new(vec![slot]), personal.clone()).await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let t = snap.tickets[0].id;
+    let qa = agent(&snap, "Golden QA").id;
+    let (s, v) = srv
+        .post(
+            &member,
+            &format!("/tickets/{t}/assign"),
+            json!({"agent_id": qa}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{v}");
+    assert!(v["error"]
+        .as_str()
+        .unwrap()
+        .contains("connect your own Claude Code"));
+    // Mentioning an agent is refused the same way (the agent explains in the thread).
+    srv.post(
+        &member,
+        "/comments",
+        json!({"ticket_id": t, "anchor": {"on": "ticket"},
+        "body": format!("@[Golden QA](agent:{qa}) go")}),
+    )
+    .await;
+    assert!(
+        personal.specs().is_empty(),
+        "a non-owner's work reached the personal runner"
+    );
+    let snap = srv.snapshot(&owner).await;
+    assert!(snap.runs.is_empty());
+    assert!(all_idle(&snap));
 }

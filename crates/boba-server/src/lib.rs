@@ -89,8 +89,11 @@ pub async fn shutdown_runs(state: &SharedState, grace: Duration) {
     tracing::info!(runs = live.len(), "cancelling live runs before exit");
     for id in &live {
         let runner = match state.db.run(*id).await {
-            Ok(Some(run)) => state.runner_of(&run).clone(),
-            _ => state.runners.primary().clone(),
+            Ok(Some(run)) => match state.runner_of(&run) {
+                Some(r) => r.clone(),
+                None => continue,
+            },
+            _ => continue,
         };
         if let Err(e) = runner.cancel(*id).await {
             tracing::warn!(error = ?e, run_id = %id, "cancel on shutdown");

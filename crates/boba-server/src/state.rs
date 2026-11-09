@@ -258,8 +258,8 @@ impl AppState {
     }
 
     /// The runner a run was routed to.
-    pub fn runner_of(&self, run: &Run) -> &Arc<dyn Runner> {
-        &self.runners.by_id(run.runner_id).runner
+    pub fn runner_of(&self, run: &Run) -> Option<&Arc<dyn Runner>> {
+        self.runners.by_id(run.runner_id).map(|s| &s.runner)
     }
 
     /// Full board state. Taken under the orchestrator lock so it never shows a half-applied
