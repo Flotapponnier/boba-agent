@@ -345,8 +345,7 @@ impl Db {
             default_branch: row.try_get("default_branch")?,
             runner_id: opt_id(row, "runner_id")?,
             sync: serde_json::from_str(&row.try_get::<String, _>("sync")?).unwrap_or_default(),
-            // TODO(server): persist (column `ai_attribution`, default 1).
-            ai_attribution: true,
+            ai_attribution: row.try_get::<i64, _>("ai_attribution")? != 0,
         })
     }
 
@@ -371,11 +370,12 @@ impl Db {
 
     pub async fn save_repo(&self, r: &Repo) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO repos(id, name, path, remote_url, default_branch, runner_id, sync)
-             VALUES(?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO repos(id, name, path, remote_url, default_branch, runner_id, sync, ai_attribution)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, path = excluded.path,
                remote_url = excluded.remote_url, default_branch = excluded.default_branch,
-               runner_id = excluded.runner_id, sync = excluded.sync",
+               runner_id = excluded.runner_id, sync = excluded.sync,
+               ai_attribution = excluded.ai_attribution",
         )
         .bind(r.id.to_string())
         .bind(&r.name)
@@ -384,6 +384,7 @@ impl Db {
         .bind(&r.default_branch)
         .bind(s(r.runner_id))
         .bind(json(&r.sync))
+        .bind(r.ai_attribution as i64)
         .execute(&self.pool)
         .await?;
         Ok(())

@@ -2495,3 +2495,85 @@ async fn quests_run_now_schedule_and_results() {
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn repo_settings_persist_and_reach_the_runner() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let (_, repo) = srv
+        .post(
+            &owner,
+            "/repos",
+            json!({"name": "app", "path": "/srv/app", "remote_url": "https://github.com/acme/app"}),
+        )
+        .await;
+    assert_eq!(repo["ai_attribution"], true);
+    let rid = repo["id"].as_str().unwrap();
+    assert_eq!(
+        srv.req(
+            &member,
+            "PATCH",
+            &format!("/repos/{rid}"),
+            Some(json!({"ai_attribution": false}))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (s, v) = srv
+        .req(
+            &owner,
+            "PATCH",
+            &format!("/repos/{rid}"),
+            Some(json!({"ai_attribution": false, "default_branch": "trunk"})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let snap2 = srv.snapshot(&owner).await;
+    let r = snap2
+        .repos
+        .iter()
+        .find(|r| r.id.to_string() == rid)
+        .unwrap();
+    assert_eq!(
+        (r.ai_attribution, r.default_branch.as_str()),
+        (false, "trunk")
+    );
+    // A run in a tab using that repo carries the flag.
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/tabs/{}", snap.tabs[0].id),
+        Some(json!({"repo_id": rid})),
+    )
+    .await;
+    let t = snap
+        .tickets
+        .iter()
+        .find(|t| t.tab_id == snap.tabs[0].id)
+        .unwrap()
+        .id;
+    srv.post(
+        &owner,
+        &format!("/tickets/{t}/assign"),
+        json!({"agent_id": agent(&snap, "Boba Dev").id}),
+    )
+    .await;
+    srv.until(&owner, "ran", |s| {
+        s.runs.iter().any(|r| r.ticket_id == Some(t))
+    })
+    .await;
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.ticket.as_ref().is_some_and(|x| x.id == t))
+        .unwrap();
+    let repo = spec.repo.unwrap();
+    assert_eq!(
+        (repo.ai_attribution, repo.default_branch.as_str()),
+        (false, "trunk")
+    );
+}

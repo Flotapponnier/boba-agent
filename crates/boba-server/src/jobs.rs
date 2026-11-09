@@ -48,6 +48,7 @@ pub async fn job_repo(
             path: r.path,
             default_branch: r.default_branch,
             remote_url: r.remote_url,
+            ai_attribution: r.ai_attribution,
         })),
         None if job.output == JobOutput::PullRequest && !simulated => Err(AppError::bad(format!(
             "the quest \"{}\" opens pull requests: pick a repository for it",

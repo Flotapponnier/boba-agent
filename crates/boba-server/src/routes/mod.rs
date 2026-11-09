@@ -57,7 +57,10 @@ pub fn api() -> Router<SharedState> {
         .route("/skills/rescan", post(work::rescan_skills))
         .route("/skills/{id}", get(work::get_skill).put(work::update_skill))
         .route("/repos", post(board::create_repo))
-        .route("/repos/{id}", axum::routing::delete(board::delete_repo))
+        .route(
+            "/repos/{id}",
+            patch(board::update_repo).delete(board::delete_repo),
+        )
         .route("/health", get(|| async { "ok" }))
         // quests
         .route("/jobs", post(crate::jobs::create))
