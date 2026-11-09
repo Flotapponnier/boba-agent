@@ -51,6 +51,21 @@ case "${FAKE_MODE:-work}" in
     say '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"File created"}]}}'
     result "Implemented the feature."
     wait_eof ;;
+  commit_attr)
+    echo "x" > attr.txt
+    git add attr.txt
+    git commit -q -m "Add attr
+
+Body line.
+
+Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
+    echo "y" > attr2.txt
+    git add attr2.txt
+    git commit -q -m "Second
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+    result "Done."
+    wait_eof ;;
   noop)
     result "Nothing to do."
     wait_eof ;;

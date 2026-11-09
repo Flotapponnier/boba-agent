@@ -60,6 +60,7 @@ pub fn job_prompt(spec: &RunSpec, job: &JobSpec, workdir: &str, branch: Option<&
            markdown report (findings, numbers, what you filed or changed).\n"
     ));
     s.push_str(&board_note(spec));
+    s.push_str(attribution_note(spec));
     s
 }
 
@@ -189,6 +190,15 @@ fn ticket_block(t: &TicketSpec) -> String {
     s
 }
 
+fn attribution_note(spec: &RunSpec) -> &'static str {
+    if spec.repo.as_ref().is_some_and(|r| !r.ai_attribution) {
+        "- This repository does not allow AI attribution: no `Co-Authored-By` trailer and no \"Generated with\" \
+         line in commit messages.\n"
+    } else {
+        ""
+    }
+}
+
 pub fn work_prompt(spec: &RunSpec, t: &TicketSpec, branch: &str) -> String {
     let resumed = spec.resume_session_id.is_some();
     let mut s = String::new();
@@ -234,6 +244,7 @@ pub fn work_prompt(spec: &RunSpec, t: &TicketSpec, branch: &str) -> String {
         base = default_branch(spec)
     ));
     s.push_str(&board_note(spec));
+    s.push_str(attribution_note(spec));
     s
 }
 
