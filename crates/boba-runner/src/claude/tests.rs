@@ -62,8 +62,20 @@ fn runner(e: &Env, mode: &str) -> ClaudeCodeRunner {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
+    wait_executable(&wrapper);
     cfg.claude_bin = wrapper;
     ClaudeCodeRunner::new(cfg).unwrap()
+}
+
+/// Linux: a script written just now can fail with ETXTBSY ("Text file busy") while another
+/// test thread's fork still holds the write descriptor. Wait until it can be executed.
+fn wait_executable(path: &Path) {
+    for _ in 0..100 {
+        match std::process::Command::new(path).arg("--version").output() {
+            Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(Duration::from_millis(20)),
+            _ => return,
+        }
+    }
 }
 
 fn spec(e: &Env, kind: RunKind) -> RunSpec {
@@ -617,6 +629,7 @@ async fn subscription_mode_uses_the_default_config_dir_and_no_api_key() {
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    wait_executable(&wrapper);
     cfg.claude_bin = wrapper;
     let err = ClaudeCodeRunner::connect(cfg)
         .await
@@ -677,4 +690,64 @@ async fn no_ai_attribution_rewrites_commits_and_sets_claude_settings() {
     .await
     .unwrap();
     assert!(log.contains("Co-Authored-By: Claude"));
+}
+
+/// Placeholder, not a real token.
+const FAKE_TOKEN: &str = "placeholder-gh-value";
+
+#[tokio::test]
+async fn github_app_token_and_bot_identity() {
+    use boba_core::runner::{GitAuthor, SecretString};
+    let e = env().await;
+    let r = runner(&e, "work");
+    let mut s = spec(&e, RunKind::Work);
+    {
+        let repo = s.repo.as_mut().unwrap();
+        repo.git_token = Some(SecretString(FAKE_TOKEN.into()));
+        repo.git_author = Some(GitAuthor {
+            name: "boba-agent[bot]".into(),
+            email: "42+boba-agent[bot]@users.noreply.github.com".into(),
+        });
+    }
+    let updates = run(&r, s).await;
+    let o = outcome(&updates);
+    assert_eq!(o.status, RunStatus::Succeeded, "{o:?}");
+    // Committed (by the runner, from the agent's leftovers) as the bot.
+    let who = crate::git::run(
+        Path::new("git"),
+        &[
+            "log",
+            "-1",
+            "--format=%an <%ae>|%cn",
+            "boba/T-5-add-feature",
+        ],
+        &e.root.join("origin.git"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        who,
+        "boba-agent[bot] <42+boba-agent[bot]@users.noreply.github.com>|boba-agent[bot]"
+    );
+    // The agent gets the same auth through its env, never through argv.
+    let env_dump = read(&e.out.join("env.txt"));
+    assert!(env_dump.contains(&format!("GH_TOKEN={FAKE_TOKEN}")));
+    assert!(env_dump.contains("GIT_AUTHOR_NAME=boba-agent[bot]"));
+    assert!(env_dump.contains("GIT_CONFIG_COUNT=4"));
+    assert!(!read(&e.out.join("args.txt")).contains(FAKE_TOKEN));
+    // Nothing on disk.
+    let cfg = std::fs::read_to_string(e.repo.join(".git/config")).unwrap();
+    assert!(
+        !cfg.contains(FAKE_TOKEN) && !cfg.contains("x-access-token"),
+        "{cfg}"
+    );
+    assert!(texts(&updates, LogKind::System)
+        .iter()
+        .any(|t| t.contains("GitHub App")));
+    for t in texts(&updates, LogKind::System)
+        .iter()
+        .chain(texts(&updates, LogKind::Error).iter())
+    {
+        assert!(!t.contains(FAKE_TOKEN), "token in logs: {t}");
+    }
 }

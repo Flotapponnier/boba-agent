@@ -521,13 +521,33 @@ struct Place {
     finish: Finish,
 }
 
+/// The runner config with git/gh authenticated for the run's repo (GitHub App token and
+/// bot identity, when the server sent them).
+fn with_repo_auth(cfg: &ClaudeConfig, spec: &RunSpec) -> ClaudeConfig {
+    let mut c = cfg.clone();
+    if let Some(r) = &spec.repo {
+        c.tools = cfg.tools.with_auth(
+            r.git_token.as_ref().map(|t| t.expose()),
+            r.git_author
+                .as_ref()
+                .map(|a| (a.name.as_str(), a.email.as_str())),
+        );
+    }
+    c
+}
+
 async fn execute(
     inner: Arc<Inner>,
     spec: RunSpec,
     em: Emitter,
     rx: ControlRx,
 ) -> Result<RunOutcome, Stop> {
-    let cfg = &inner.cfg;
+    let run_cfg = with_repo_auth(&inner.cfg, &spec);
+    let cfg = &run_cfg;
+    if cfg.tools.has_token() {
+        em.system("Using the Boba Agent GitHub App for git and gh")
+            .await?;
+    }
     let place = match prepare(cfg, &spec, &em).await {
         Ok(p) => p,
         Err(e) => {
@@ -1060,7 +1080,10 @@ fn build_command(
         .env("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GH_PROMPT_DISABLED", "1")
-        .env("BOBA_RUN_ID", spec.run_id.to_string());
+        .env("BOBA_RUN_ID", spec.run_id.to_string())
+        // The agent's own git/gh calls use the same repo auth and identity as ours.
+        .envs(cfg.tools.git_env())
+        .envs(cfg.tools.gh_env());
     if let Some(t) = &spec.ticket {
         cmd.env("BOBA_TICKET", format!("T-{}", t.number));
     }
