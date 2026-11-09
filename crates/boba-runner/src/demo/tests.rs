@@ -497,6 +497,9 @@ async fn command_runs_return_a_plan() {
         text: "create an agent named Mochi to review PRs".into(),
         voice: true,
         user_name: "Florent".into(),
+        tab_id: None,
+        ticket_id: None,
+        agent_id: None,
         board_digest: serde_json::json!({ "agents": [], "tabs": [] }),
     });
     let updates = run_to_end(&r, s).await;
