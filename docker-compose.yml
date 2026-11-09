@@ -1,0 +1,21 @@
+# Boba Agent on a single server. See docs/DEPLOY.md.
+services:
+  boba:
+    build:
+      context: .
+      args:
+        UID: ${BOBA_UID:-1000}
+        GID: ${BOBA_GID:-1000}
+    image: boba-agent:local
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Behind a reverse proxy (recommended): "127.0.0.1:7777:7777"
+      - "${BOBA_BIND:-127.0.0.1}:7777:7777"
+    volumes:
+      - ./data:/data
+      # Repositories agents may work in, at the same path inside the container.
+      - ${BOBA_REPOS_DIR:-./repos}:${BOBA_REPOS_DIR:-/repos}
+      # Subscription mode only: the machine owner's Claude Code login.
+      - ${CLAUDE_HOME:-./claude-home}/.claude:/home/boba/.claude
+      - ${CLAUDE_HOME:-./claude-home}/.claude.json:/home/boba/.claude.json

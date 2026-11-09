@@ -6,6 +6,7 @@ web/dist/
 *.db-wal
 .env
 .env.*
+!.env.example
 .DS_Store
 # local-only research and throwaway prototype
 /research_notes/
