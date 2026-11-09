@@ -532,3 +532,92 @@ fn mcp_names_and_args() {
     assert!(a.windows(2).any(|w| w[0] == "--resume" && w[1] == "old"));
     assert!(!a.contains(&"--session-id".to_string()));
 }
+
+#[test]
+fn auth_status_mapping() {
+    let st = |m: &str, p: &str, li: bool| {
+        format!(r#"{{"loggedIn": {li}, "authMethod": "{m}", "apiProvider": "{p}"}}"#)
+    };
+    use AuthMode::*;
+    assert_eq!(
+        parse_auth_status(&st("claude.ai", "firstParty", true), Subscription),
+        Ok(RunnerAuth::Subscription)
+    );
+    assert_eq!(
+        parse_auth_status(&st("api_key", "firstParty", true), ApiKey),
+        Ok(RunnerAuth::ApiKey)
+    );
+    assert_eq!(
+        parse_auth_status(&st("api_key", "bedrock", true), ApiKey),
+        Ok(RunnerAuth::Bedrock)
+    );
+    assert_eq!(
+        parse_auth_status(&st("api_key", "vertex", true), ApiKey),
+        Ok(RunnerAuth::Vertex)
+    );
+    assert!(
+        parse_auth_status(&st("none", "firstParty", false), Subscription)
+            .unwrap_err()
+            .contains("claude auth login")
+    );
+    assert!(parse_auth_status(&st("none", "firstParty", false), ApiKey)
+        .unwrap_err()
+        .contains("ANTHROPIC_API_KEY"));
+    assert!(parse_auth_status(&st("api_key", "firstParty", true), Subscription).is_err());
+    assert!(
+        parse_auth_status(&st("claude.ai", "firstParty", true), ApiKey)
+            .unwrap_err()
+            .contains("BOBA_CLAUDE_AUTH=subscription")
+    );
+    assert!(parse_auth_status("Usage: …", Subscription).is_err());
+}
+
+#[tokio::test]
+async fn subscription_mode_uses_the_default_config_dir_and_no_api_key() {
+    let e = env().await;
+    // A key in the server env must not reach Claude in subscription mode.
+    std::env::set_var("ANTHROPIC_AUTH_TOKEN", "should-not-leak");
+    let r = {
+        let base = runner(&e, "work");
+        let mut cfg = base.inner.cfg.clone();
+        cfg.auth_mode = AuthMode::Subscription;
+        cfg.isolate_config_dir = true; // ignored in subscription mode
+        cfg.data_dir = e.root.join("data-sub");
+        ClaudeCodeRunner::connect(cfg).await.unwrap()
+    };
+    assert_eq!(r.auth(), RunnerAuth::Subscription);
+    let auth_env = read(&e.out.join("auth_env.txt"));
+    assert!(!auth_env.contains("should-not-leak"));
+    let updates = run(&r, spec(&e, RunKind::Work)).await;
+    assert_eq!(outcome(&updates).status, RunStatus::Succeeded);
+    let run_env = read(&e.out.join("env.txt"));
+    assert!(!run_env.contains("should-not-leak"), "API key vars dropped");
+    assert!(
+        !run_env.contains("data-sub/agents"),
+        "no per-agent config dir"
+    );
+    std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+
+    // Not logged in: connect fails loudly.
+    let mut cfg = r.inner.cfg.clone();
+    cfg.data_dir = e.root.join("data-sub2");
+    let wrapper = e.root.join("claude-loggedout.sh");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/usr/bin/env bash\nexport FAKE_OUT='{}' FAKE_AUTH='{{\"loggedIn\": false, \"authMethod\": \"none\"}}'\nexec '{}' \"$@\"\n",
+            e.out.display(),
+            fixtures().join("fake-claude.sh").display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    cfg.claude_bin = wrapper;
+    let err = ClaudeCodeRunner::connect(cfg)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(err.contains("claude auth login"), "{err}");
+}
