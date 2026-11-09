@@ -1124,6 +1124,23 @@ async fn drive(
         }
     }
     drop(stdin);
+    // stdout closed first: stderr may still hold the reason it died (seen on Linux).
+    if stderr_open && !timed_out {
+        let drain = async {
+            while let Ok(Some(l)) = err.next_line().await {
+                if !l.trim().is_empty() {
+                    stderr_tail.push(l.clone());
+                    if stderr_tail.len() > 20 {
+                        stderr_tail.remove(0);
+                    }
+                    if em.log(LogKind::Error, l, None).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(2), drain).await;
+    }
     let status = match tokio::time::timeout(Duration::from_secs(10), child.wait()).await {
         Ok(Ok(s)) => Some(s),
         _ => {
