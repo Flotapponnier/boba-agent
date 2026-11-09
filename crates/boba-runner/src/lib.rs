@@ -2,19 +2,27 @@
 //!
 //! Executes agent runs. Owned by the runner workstream (see CONTRIBUTING.md).
 //!
-//! Implementations planned:
-//! * `ClaudeCodeRunner` – spawns the `claude` CLI in headless stream-json mode inside a
-//!   dedicated git worktree, parses its event stream into [`RunUpdate`]s, opens PRs.
-//! * `DemoRunner` – no Claude Code needed: simulates a believable run (log lines,
-//!   progress, PR, review verdict) so the UI is fully playable out of the box.
+//! Implementations:
+//! * [`ClaudeCodeRunner`] – spawns the `claude` CLI headless (stream-json in and out) inside a
+//!   dedicated git worktree, parses its event stream into [`RunUpdate`]s, answers permission
+//!   prompts, commits/pushes and opens PRs. Covers work, review, job and command runs.
+//! * [`DemoRunner`] – no Claude Code needed: simulates believable runs of every kind (log lines,
+//!   progress, PR, review verdict, job reports, command plans) so the UI is playable out of the box.
+//!
+//! Both share [`table::RunTable`] (control channels, concurrency limit, exactly one `Finished`).
 //!
 //! The trait below is the contract the server codes against. Keep it stable.
 
+pub mod claude;
 pub mod demo;
 pub mod emit;
+pub mod git;
+pub mod process;
 pub mod skills;
+pub mod table;
 pub mod util;
 
+pub use claude::{ClaudeCodeRunner, ClaudeConfig};
 pub use demo::{DemoConfig, DemoRunner};
 
 use async_trait::async_trait;
