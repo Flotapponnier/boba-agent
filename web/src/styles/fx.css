@@ -1,0 +1,205 @@
+@keyframes bob {
+  50% {
+    transform: translateY(-4px);
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes spin-hop {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  30% {
+    transform: translateY(-7px) rotate(-12deg) scale(1.05);
+  }
+  55% {
+    transform: translateY(-9px) rotate(200deg) scale(1.05);
+  }
+  80% {
+    transform: translateY(0) rotate(360deg) scale(0.96, 1.04);
+  }
+  100% {
+    transform: translateY(0) rotate(360deg);
+  }
+}
+@keyframes wiggle {
+  25% {
+    transform: rotate(-8deg);
+  }
+  75% {
+    transform: rotate(8deg);
+  }
+}
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+@keyframes glow {
+  to {
+    box-shadow: 0 0 18px 4px rgba(255, 210, 63, 0.8);
+  }
+}
+@keyframes barber {
+  to {
+    background-position: 17px 0;
+  }
+}
+@keyframes landed {
+  0% {
+    transform: scale(0.94) rotate(var(--r));
+  }
+  60% {
+    transform: scale(1.06) rotate(0deg);
+  }
+}
+@keyframes recruit {
+  0% {
+    transform: translateY(-30px) scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+
+.fx-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 80;
+  overflow: hidden;
+}
+.fly {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  pointer-events: none;
+  will-change: transform;
+}
+.float-text {
+  position: fixed;
+  left: 0;
+  top: 0;
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--gold);
+  text-shadow: 2px 2px 0 #000, -1px -1px 0 #000;
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+.float-text.xp {
+  color: #9ef7a8;
+}
+.confetti {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 8px;
+  height: 12px;
+  will-change: transform;
+}
+
+/* stamp slam on a ticket */
+.slam {
+  position: fixed;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.slam span {
+  font-family: var(--pixel);
+  font-size: 15px;
+  letter-spacing: 1px;
+  padding: 8px 12px;
+  border: 4px solid currentColor;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.7);
+  transform: rotate(-10deg);
+  white-space: nowrap;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5);
+}
+.slam.ok span {
+  color: #1e8449;
+}
+.slam.bad span {
+  color: #c0392b;
+}
+.slam.fail span {
+  color: #8e44ad;
+}
+
+/* level up banner */
+.levelup-banner {
+  position: fixed;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 16px 26px 18px;
+  text-align: center;
+  pointer-events: none;
+  z-index: 85;
+}
+.levelup-banner .sprite {
+  width: 110px;
+  height: 110px;
+}
+.levelup-banner .sprite img {
+  animation: spin-hop 0.9s ease-in-out infinite;
+}
+.levelup-banner h2 {
+  font-family: var(--pixel);
+  font-size: 22px;
+  color: var(--gold);
+  text-shadow: 3px 3px 0 var(--wood-dark), -2px -2px 0 var(--wood-dark);
+}
+.levelup-banner p {
+  font-family: var(--pixel);
+  font-size: 10px;
+  color: #fff;
+  text-shadow: 2px 2px 0 #000;
+  line-height: 1.6;
+}
+.rays {
+  position: absolute;
+  inset: -60px;
+  z-index: -1;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 210, 63, 0.35) 0 10deg, transparent 10deg 20deg);
+  -webkit-mask: radial-gradient(circle, #000 20%, transparent 65%);
+  mask: radial-gradient(circle, #000 20%, transparent 65%);
+  animation: spin 8s linear infinite;
+}
+.poof {
+  position: fixed;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  border: 4px solid #fff;
+  pointer-events: none;
+}

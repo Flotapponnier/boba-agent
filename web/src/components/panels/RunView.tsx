@@ -1,0 +1,370 @@
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { api } from '../../api/client';
+import { connection } from '../../api/connection';
+import type { Run, RunLogLine } from '../../api/types';
+import { compact, duration, usd } from '../../lib/format';
+import { answerPermission, cancelRun, messageRun } from '../../store/actions';
+import { isActive, useCan } from '../../store/selectors';
+import { useBoard } from '../../store/store';
+import { Markdown } from '../ui/Markdown';
+import { Sprite } from '../ui/Sprite';
+
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj => (v && typeof v === 'object' ? (v as Obj) : {});
+const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : JSON.stringify(v, null, 2));
+
+export const STATUS_LABEL: Record<Run['status'], string> = {
+  queued: 'Queued',
+  running: 'Running',
+  waiting: 'Needs you',
+  succeeded: 'Done',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+function useNow(active: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function ToolInput({ name, input }: { name: string; input: Obj }) {
+  if (name === 'Edit' || name === 'MultiEdit') {
+    const edits = name === 'MultiEdit' && Array.isArray(input.edits) ? (input.edits as Obj[]) : [input];
+    return (
+      <>
+        <span className="lbl">{str(input.file_path)}</span>
+        {edits.map((e, i) => (
+          <pre key={i}>
+            {str(e.old_string)
+              .split('\n')
+              .map((l, j) => (
+                <span key={`d${j}`} className="diff-del">
+                  - {l}
+                </span>
+              ))}
+            {str(e.new_string)
+              .split('\n')
+              .map((l, j) => (
+                <span key={`a${j}`} className="diff-add">
+                  + {l}
+                </span>
+              ))}
+          </pre>
+        ))}
+      </>
+    );
+  }
+  if (name === 'Bash')
+    return (
+      <>
+        {!!input.description && <span className="lbl">{str(input.description)}</span>}
+        <pre>$ {str(input.command)}</pre>
+      </>
+    );
+  if (name === 'Write')
+    return (
+      <>
+        <span className="lbl">{str(input.file_path)}</span>
+        <pre>{str(input.content)}</pre>
+      </>
+    );
+  if (name === 'TodoWrite' && Array.isArray(input.todos))
+    return (
+      <ul className="todos">
+        {(input.todos as Obj[]).map((t, i) => (
+          <li key={i} className={str(t.status)}>
+            {t.status === 'completed' ? '☑' : t.status === 'in_progress' ? '▶' : '☐'} {str(t.content)}
+          </li>
+        ))}
+      </ul>
+    );
+  return <pre>{JSON.stringify(input, null, 2)}</pre>;
+}
+
+const ToolCard = memo(function ToolCard({ use, result, defaultOpen }: { use: RunLogLine; result?: RunLogLine; defaultOpen: boolean }) {
+  const d = obj(use.data);
+  const name = str(d.name) || 'Tool';
+  const r = obj(result?.data);
+  const isErr = r.is_error === true;
+  const summary = use.text.startsWith(name) ? use.text.slice(name.length).trim() : use.text;
+  return (
+    <details className={`tool ${isErr ? 'err' : ''} ${result ? '' : 'pending'}`} open={defaultOpen || name === 'TodoWrite'}>
+      <summary>
+        <span className="tool-name">{name}</span>
+        <span className="tool-sum">{summary}</span>
+        <span className="tool-state">{result ? (isErr ? '✗' : '✓') : '…'}</span>
+      </summary>
+      <div className="tool-body">
+        <ToolInput name={name} input={obj(d.input)} />
+        {result && (
+          <>
+            <span className="lbl">{isErr ? 'ERROR' : 'OUTPUT'}</span>
+            <pre>{str(r.output ?? r.content) || result.text}</pre>
+          </>
+        )}
+      </div>
+    </details>
+  );
+});
+
+function PermissionCard({ line, resolved, run }: { line: RunLogLine; resolved?: { allow: boolean; user_id?: string }; run: Run }) {
+  const p = obj(obj(line.data).permission_request);
+  const canRun = useCan('run_agents');
+  const who = useBoard((s) => (resolved?.user_id ? s.users[resolved.user_id]?.name : undefined));
+  const [busy, setBusy] = useState(false);
+  const answer = async (allow: boolean) => {
+    setBusy(true);
+    await answerPermission(run.id, str(p.request_id), allow);
+    setBusy(false);
+  };
+  return (
+    <div className={`perm ${resolved ? 'resolved' : ''}`}>
+      <h4>✋ PERMISSION: {str(p.tool) || 'tool'}</h4>
+      <pre>{JSON.stringify(p.input ?? {}, null, 2)}</pre>
+      {resolved ? (
+        <span>{resolved.allow ? `✓ Allowed${who ? ` by ${who}` : ''}` : `✗ Denied${who ? ` by ${who}` : ''}`}</span>
+      ) : canRun && isActive(run) ? (
+        <div className="row">
+          <button className="btn green sm" disabled={busy} onClick={() => void answer(true)}>
+            Allow
+          </button>
+          <button className="btn red sm" disabled={busy} onClick={() => void answer(false)}>
+            Deny
+          </button>
+        </div>
+      ) : (
+        <span className="muted">Waiting for someone with the Run agents permission…</span>
+      )}
+    </div>
+  );
+}
+
+function Verdict({ text }: { text: string }) {
+  const m = text.match(/```boba-verdict\s*([\s\S]*?)```/);
+  if (!m) return <Markdown text={text} className="l-text" />;
+  let v: Obj = {};
+  try {
+    v = obj(JSON.parse(m[1] ?? '{}'));
+  } catch {
+    /* malformed verdict, show raw */
+  }
+  const verdict = str(v.verdict);
+  return (
+    <div className="l-text">
+      <Markdown text={text.replace(m[0], '').trim()} />
+      <div style={{ marginTop: 6 }}>
+        <span className={`verdict ${verdict}`}>{verdict === 'approved' ? '✓ APPROVED' : '✗ CHANGES REQUESTED'}</span>
+        {!!v.feedback && <p style={{ marginTop: 4 }}>{str(v.feedback)}</p>}
+      </div>
+    </div>
+  );
+}
+
+function UserLine({ line }: { line: RunLogLine }) {
+  const name = useBoard((s) => s.users[str(obj(line.data).user_id)]?.name);
+  return (
+    <div className="l-user">
+      {name && <small>{name}</small>}
+      {line.text}
+    </div>
+  );
+}
+
+/** Live transcript of one run: text, collapsed thinking, tool cards, permission prompts. */
+export function RunView({ run, onSwitchRun }: { run: Run; onSwitchRun?: (id: string) => void }) {
+  const lines = useBoard((s) => s.logs[run.id]);
+  const agent = useBoard((s) => s.agents[run.agent_id]);
+  const canRun = useCan('run_agents');
+  const active = isActive(run);
+  const now = useNow(active);
+  const box = useRef<HTMLDivElement>(null);
+  const [stick, setStick] = useState(true);
+  const [msg, setMsg] = useState('');
+  const [sending, setSending] = useState(false);
+
+  // History first (REST), then live (WS subscription replays the last 200 lines).
+  useEffect(() => {
+    let alive = true;
+    api
+      .runLogs(run.id, undefined, 2000)
+      .then((ls) => alive && useBoard.getState().mergeLogs(run.id, ls))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [run.id]);
+  useEffect(() => (active ? connection.subscribe(run.id) : undefined), [run.id, active]);
+
+  const items = useMemo(() => {
+    const ls = lines ?? [];
+    const results = new Map<string, RunLogLine>();
+    const resolved = new Map<string, { allow: boolean; user_id?: string }>();
+    for (const l of ls) {
+      if (l.kind === 'tool_result') results.set(str(obj(l.data).tool_use_id), l);
+      const pr = obj(obj(l.data).permission_resolved);
+      if (pr.request_id) resolved.set(str(pr.request_id), { allow: pr.allow === true, user_id: pr.user_id ? str(pr.user_id) : undefined });
+    }
+    return { ls, results, resolved };
+  }, [lines]);
+
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el && stick) el.scrollTop = el.scrollHeight;
+  }, [items, stick]);
+
+  const onScroll = () => {
+    const el = box.current;
+    if (el) setStick(el.scrollTop + el.clientHeight >= el.scrollHeight - 24);
+  };
+
+  const send = async () => {
+    const text = msg.trim();
+    if (!text) return;
+    setSending(true);
+    const r = await messageRun(run.id, text);
+    setSending(false);
+    if (r) {
+      setMsg('');
+      setStick(true);
+      if (r.id !== run.id) onSwitchRun?.(r.id);
+    }
+  };
+
+  const lastToolIdx = (() => {
+    for (let i = items.ls.length - 1; i >= 0; i--) if (items.ls[i]?.kind === 'tool_use') return i;
+    return -1;
+  })();
+
+  return (
+    <div>
+      <div className="run-head">
+        <div className="row">
+          {agent && <Sprite sprite={agent.sprite} color={agent.color} status={active ? agent.status : 'idle'} size={40} />}
+          <div className="grow">
+            <b className="label">
+              {agent?.name ?? 'Agent'} · {run.kind === 'review' ? 'Review' : 'Work'}
+            </b>
+            <div className="hint-text">{run.activity ?? (active ? 'Starting…' : run.summary ?? '')}</div>
+          </div>
+          <span className={`run-status ${run.status}`}>{STATUS_LABEL[run.status]}</span>
+        </div>
+        {active && (
+          <div className="bar" style={{ '--c': agent?.color ?? '#f39c12', marginTop: 0 } as React.CSSProperties}>
+            <i style={{ width: `${Math.max(3, Math.round(run.progress * 100))}%` }} />
+          </div>
+        )}
+        <div className="run-meta">
+          <span>
+            ⏱ <b>{duration(run.started_at ?? run.created_at, run.ended_at, now)}</b>
+          </span>
+          <span>
+            💰 <b>{usd(run.cost_usd)}</b>
+          </span>
+          <span>
+            ⇣ <b>{compact(run.input_tokens)}</b> ⇡ <b>{compact(run.output_tokens)}</b> tokens
+          </span>
+          {run.branch && (
+            <span>
+              ⎇ <b>{run.branch}</b>
+            </span>
+          )}
+          {run.verdict && <span className={`verdict ${run.verdict}`}>{run.verdict === 'approved' ? 'APPROVED' : 'CHANGES REQUESTED'}</span>}
+        </div>
+        {run.error && <div className="form-error">⚠ {run.error}</div>}
+        {active && canRun && (
+          <div className="row">
+            <button className="btn red sm" onClick={() => void cancelRun(run.id)}>
+              ⏹ Call {agent?.name ?? 'the agent'} back
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="transcript" ref={box} onScroll={onScroll} aria-live={active ? 'polite' : 'off'} aria-label="Transcript">
+        {items.ls.length === 0 && <div className="l-system">{active ? 'Waiting for the first words…' : 'No transcript for this run.'}</div>}
+        {items.ls.map((l, i) => {
+          switch (l.kind) {
+            case 'text':
+              return <Verdict key={l.seq} text={l.text} />;
+            case 'thinking':
+              return (
+                <details key={l.seq} className="l-thinking">
+                  <summary>Thinking…</summary>
+                  {l.text}
+                </details>
+              );
+            case 'tool_use':
+              return <ToolCard key={l.seq} use={l} result={items.results.get(str(obj(l.data).id))} defaultOpen={active && i === lastToolIdx} />;
+            case 'tool_result': {
+              const id = str(obj(l.data).tool_use_id);
+              // Orphan results (no matching tool_use) still show.
+              return items.ls.some((u) => u.kind === 'tool_use' && str(obj(u.data).id) === id) ? null : (
+                <pre key={l.seq} className="l-system">
+                  {l.text}
+                </pre>
+              );
+            }
+            case 'system': {
+              const d = obj(l.data);
+              if (d.permission_request) return <PermissionCard key={l.seq} line={l} run={run} resolved={items.resolved.get(str(obj(d.permission_request).request_id))} />;
+              if (d.permission_resolved) return null;
+              return (
+                <div key={l.seq} className="l-system">
+                  {l.text}
+                </div>
+              );
+            }
+            case 'error':
+              return (
+                <div key={l.seq} className="l-error">
+                  {l.text}
+                </div>
+              );
+            case 'user':
+              return <UserLine key={l.seq} line={l} />;
+            default:
+              return null;
+          }
+        })}
+        {!stick && (
+          <button className="jump-live" onClick={() => setStick(true)}>
+            ↓ Jump to latest
+          </button>
+        )}
+      </div>
+
+      {canRun && (
+        <form
+          className="follow"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send();
+          }}
+        >
+          <label className="grow">
+            <span className="sr-only">Message to the agent</span>
+            <textarea
+              value={msg}
+              onChange={(e) => setMsg(e.target.value)}
+              placeholder={active ? `Tell ${agent?.name ?? 'the agent'} something…` : 'Send a follow-up (starts a new round)…'}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+          </label>
+          <button className="btn gold" disabled={sending || !msg.trim()}>
+            Send
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
