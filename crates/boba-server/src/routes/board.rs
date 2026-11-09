@@ -359,6 +359,7 @@ pub async fn create_repo(
             .unwrap_or_else(|| "main".into()),
         runner_id: req.runner_id,
         sync: req.sync.unwrap_or_default(),
+        ai_attribution: req.ai_attribution.unwrap_or(true),
     };
     state.db.save_repo(&repo).await?;
     state.upsert(Entity::Repo(repo.clone()));

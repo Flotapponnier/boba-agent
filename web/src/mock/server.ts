@@ -711,7 +711,7 @@ class MockServer implements Transport {
     if (key === 'POST /api/repos') {
       this.need('manage_workspace');
       const c = b as unknown as CreateRepo;
-      const r = { id: mkId('r'), name: c.name, path: c.path, remote_url: c.remote_url ?? null, default_branch: c.default_branch || 'main', runner_id: c.runner_id ?? null, sync: c.sync ?? defaultSync() };
+      const r = { id: mkId('r'), name: c.name, path: c.path, remote_url: c.remote_url ?? null, default_branch: c.default_branch || 'main', runner_id: c.runner_id ?? null, ai_attribution: c.ai_attribution ?? true, sync: c.sync ?? defaultSync() };
       this.s.repos.push(r);
       this.upsert({ entity: 'repo', data: r });
       return r;

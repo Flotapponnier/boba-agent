@@ -355,6 +355,10 @@ pub struct CreateRepo {
     pub remote_url: Option<String>,
     pub default_branch: Option<String>,
     pub runner_id: Option<Id>,
+    /// Default true.
+    #[ts(optional)]
+    #[serde(default)]
+    pub ai_attribution: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -403,6 +407,9 @@ pub struct UpdateRepo {
     pub remote_url: Option<Option<String>>,
     pub default_branch: Option<String>,
     pub sync: Option<RepoSync>,
+    #[ts(optional)]
+    #[serde(default)]
+    pub ai_attribution: Option<bool>,
 }
 
 /// `POST /api/repos/:id/sync` result.

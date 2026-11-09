@@ -428,6 +428,7 @@ async fn resolve_repo(
             path: r.path,
             default_branch: r.default_branch,
             remote_url: r.remote_url,
+            ai_attribution: r.ai_attribution,
         })),
         None if state.cfg.demo_mode => Ok(None),
         None => Err(AppError::bad(format!(
@@ -454,11 +455,13 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         .ok_or(AppError::NotFound("tab"))?;
     let repo = resolve_repo(state, &ticket, &tab).await?;
     let skills = db.skills().await?;
-    let skill_paths = agent
+    let agent_skills: Vec<_> = agent
         .skill_ids
         .iter()
-        .filter_map(|id| skills.iter().find(|s| s.id == *id).map(|s| s.path.clone()))
+        .filter_map(|id| skills.iter().find(|s| s.id == *id))
         .collect();
+    let skill_paths = agent_skills.iter().map(|s| s.path.clone()).collect();
+    let skill_names = agent_skills.iter().map(|s| s.name.clone()).collect();
     let (extra, resume) = db.run_inputs(run.id).await?;
     // Reviews and commands are read-only, whatever the agent is configured with:
     // plan mode and a server-enforced read-only tool allowlist.
@@ -501,6 +504,7 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         mcp_servers,
         board_tools: None,
         skill_paths,
+        skill_names,
         resume_session_id: resume,
         extra_instructions: extra,
     })

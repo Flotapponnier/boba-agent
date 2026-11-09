@@ -345,6 +345,8 @@ impl Db {
             default_branch: row.try_get("default_branch")?,
             runner_id: opt_id(row, "runner_id")?,
             sync: serde_json::from_str(&row.try_get::<String, _>("sync")?).unwrap_or_default(),
+            // TODO(server): persist (column `ai_attribution`, default 1).
+            ai_attribution: true,
         })
     }
 

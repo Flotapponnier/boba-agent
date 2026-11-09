@@ -41,10 +41,12 @@ fn spec(kind: RunKind, mode: PermissionMode) -> RunSpec {
             path: "/srv/repos/app".into(),
             default_branch: "main".into(),
             remote_url: Some("git@github.com:acme/app.git".into()),
+            ai_attribution: true,
         }),
         mcp_servers: vec![],
         board_tools: None,
         skill_paths: vec![],
+        skill_names: vec![],
         resume_session_id: None,
         extra_instructions: None,
     }
