@@ -237,10 +237,21 @@ pub struct ClaudeCodeRunner {
 }
 
 impl ClaudeCodeRunner {
-    /// Creates `data_dir` and makes it absolute (worktree paths are handed to Claude).
+    /// Creates `data_dir` and makes it absolute (worktree paths are handed to Claude), then
+    /// reaps process groups and run dirs a crashed previous server left behind. Create one
+    /// runner per data dir.
     pub fn new(mut cfg: ClaudeConfig) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&cfg.data_dir)?;
         cfg.data_dir = std::fs::canonicalize(&cfg.data_dir)?;
+        // Nothing runs yet: anything left under runs/ is from a crashed server.
+        let reaped = crate::process::reap_orphans(&cfg.data_dir.join("runs"));
+        if !reaped.killed.is_empty() || reaped.removed_dirs > 0 {
+            tracing::warn!(
+                killed = reaped.killed.len(),
+                removed = reaped.removed_dirs,
+                "cleaned up after a previous crash"
+            );
+        }
         let table = Arc::new(RunTable::new(cfg.max_concurrent_runs));
         Ok(Self {
             inner: Arc::new(Inner { cfg, table }),
@@ -978,6 +989,9 @@ async fn drive(
         }
     };
     let guard = GroupGuard::new(&child);
+    if let Err(e) = crate::process::write_pidfile(run_dir, &child, session_id) {
+        tracing::warn!("could not write the run pidfile: {e}");
+    }
     let mut stdin = child.stdin.take();
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
         guard.terminate(&mut child, Duration::from_secs(1)).await;
