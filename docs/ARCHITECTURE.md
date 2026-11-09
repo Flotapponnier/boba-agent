@@ -215,3 +215,9 @@ over `WS /api/runners/ws` with the `RunnerWire` protocol (outbound only, works b
 - Routing: a run started by user U goes to U's online personal runner if U has one (and the repo
   exists there), otherwise to a shared runner with a free slot, otherwise it stays Queued.
   Jobs and auto reviews only ever use shared runners.
+- Connector secrets never leave the server for a member's machine: decrypted MCP servers are only
+  sent to the built-in runner(s), Shared remote runners, and personal runners whose owner has
+  `ManageAutomations`. Elsewhere the connector is dropped from the run with a log line.
+- `Hello.auth` is self-reported by the runner and cannot be verified by the server; the
+  "no subscription on a Shared runner" rule relies on runners telling the truth, so only admins
+  can register Shared runners.
