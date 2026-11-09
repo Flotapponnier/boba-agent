@@ -318,6 +318,7 @@ class MockServer implements Transport {
       tickets: this.s.tickets,
       runs: [...runs.values()],
       skills: this.s.skills,
+      notifications: [],
       repos: this.s.repos,
       users: this.s.users.map((u) => this.pub(u)),
       runners: this.s.runners.map((r) => ({ ...r, active_runs: this.sims.size, last_seen_at: now() })),
