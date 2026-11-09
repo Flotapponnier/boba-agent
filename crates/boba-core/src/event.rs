@@ -42,6 +42,10 @@ pub enum HistoryKind {
     TabDeleted,
     UserJoined,
     CommandIssued,
+    CommentResolved,
+    RunnerConnected,
+    RunnerDisconnected,
+    ProfileUpdated,
     CommandExecuted,
     JobCreated,
     JobUpdated,
@@ -101,6 +105,9 @@ pub enum Entity {
     Runner(RunnerInfo),
     Job(Job),
     Connector(Connector),
+    Comment(crate::team::Comment),
+    /// Only ever sent to its owner.
+    Notification(crate::team::Notification),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -117,6 +124,8 @@ pub enum EntityKind {
     Runner,
     Job,
     Connector,
+    Comment,
+    Notification,
 }
 
 /// Purely cosmetic one-shot effects so every connected screen celebrates together.

@@ -259,6 +259,15 @@ impl AppState {
             max_concurrent_runs: self.runner.max_concurrent_runs(),
             active_runs: active,
             last_seen_at: Some(Utc::now()),
+            scope: boba_core::team::RunnerScope::Shared,
+            owner_user_id: None,
+            auth: if self.cfg.demo_mode {
+                boba_core::team::RunnerAuth::Demo
+            } else {
+                boba_core::team::RunnerAuth::ApiKey
+            },
+            host: None,
+            claude_version: None,
         })
     }
 
@@ -295,6 +304,8 @@ impl AppState {
             // Filled once the scheduler lands.
             jobs: Vec::new(),
             connectors: crate::connectors::list(&self.db).await?,
+            // Filled once comments & notifications land.
+            notifications: Vec::new(),
         })
     }
 }

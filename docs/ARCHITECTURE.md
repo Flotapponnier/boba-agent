@@ -174,3 +174,44 @@ UI context is in `CommandSpec.tab_id/ticket_id/agent_id` (runners may also accep
   echoes consumed messages with `isReplay: true`.
 - A `result` with `subtype: success` can still have `is_error: true` (e.g. "Not logged in").
 - `--allowedTools "Read,Grep,Bash(git diff:*)"` as one comma-joined argument works.
+
+## Teamwork
+
+Types: `crates/boba-core/src/team.rs`.
+
+### Accounts
+Humans are shown with the square boba portraits (`team::USER_AVATARS`), agents with the full-body
+characters. The header shows the signed-in user (avatar, name, role badge) with a menu: profile
+(`PATCH /api/me`: name, avatar, password), members & invitations (ManageUsers), sign out.
+Access is invite-only: the owner is created by `/api/auth/setup`, everyone else through an invite
+link (7-day, single use) with the role chosen by the inviter (admins cannot mint admins).
+
+### Comments, mentions, reactions
+Any ticket (or job) has comment threads (`Comment`, root + replies). A thread is anchored to the
+ticket, to a quoted passage of its body, to one transcript line of a run (`RunLog{run_id, seq}`) or
+to a whole run (review verdict, job report). Mentions are stored inline as
+`@[Name](user:<id>)` / `@[Name](agent:<id>)` and extracted server-side:
+- a mentioned **user** gets a `Mention` notification;
+- a mentioned **agent** (author needs `RunAgents`) gets a run on the ticket with the comment as
+  instructions (resuming the agent's last session on that ticket when there is one); the run id is
+  stored in `triggered_run_ids` and the agent posts its summary as a reply when it finishes.
+Reactions toggle per user. Roots can be resolved/reopened (EditTickets). Deleting is soft.
+
+### Notifications
+Per-user inbox (`Notification`), pushed over WS to that user only, listed in the snapshot (unread +
+latest 50), bell with unread count in the header. Created for: mentions, replies in threads you
+took part in, your runs finishing/failing/waiting for permission, review verdicts on tickets you
+created or ran, results of jobs you own, account changes.
+
+### Runners: "connect your Claude Code"
+Besides the built-in local runner, any machine can join as a runner: `POST /api/runners` returns a
+one-time token and a command (`boba-agent runner --server <url> --token <token>`) that connects back
+over `WS /api/runners/ws` with the `RunnerWire` protocol (outbound only, works behind NAT).
+- **Shared** runners (ManageWorkspace) run anyone's work, jobs and auto reviews. They must report
+  `auth: ApiKey | Bedrock | Vertex`; a shared runner reporting `Subscription` is refused.
+- **Personal** runners (any member, for themselves) only run work **their owner** starts (drag,
+  mention, follow-up). This is how someone uses their own Claude Pro/Max login without sharing it,
+  which Anthropic's terms do not allow.
+- Routing: a run started by user U goes to U's online personal runner if U has one (and the repo
+  exists there), otherwise to a shared runner with a free slot, otherwise it stays Queued.
+  Jobs and auto reviews only ever use shared runners.

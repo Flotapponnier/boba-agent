@@ -182,10 +182,15 @@ pub struct RunOutcome {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunnerWire {
     // runner -> server
+    /// First message after connecting with `Authorization: Bearer <runner token>`.
+    /// A runner reporting `auth: Subscription` is only ever used for its owner's runs.
     Hello {
         name: String,
         max_concurrent_runs: u32,
         version: String,
+        auth: crate::team::RunnerAuth,
+        host: String,
+        claude_version: Option<String>,
     },
     Update {
         run_id: Id,

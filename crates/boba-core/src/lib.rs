@@ -18,5 +18,6 @@ pub mod automation;
 pub mod event;
 pub mod model;
 pub mod runner;
+pub mod team;
 
 pub use model::*;

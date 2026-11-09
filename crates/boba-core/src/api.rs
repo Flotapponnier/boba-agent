@@ -23,6 +23,8 @@ pub struct Snapshot {
     pub runners: Vec<RunnerInfo>,
     pub jobs: Vec<Job>,
     pub connectors: Vec<Connector>,
+    /// The caller's unread + 50 latest notifications.
+    pub notifications: Vec<crate::team::Notification>,
     /// Latest 100 history events, newest first.
     pub history: Vec<HistoryEvent>,
     pub settings: WorkspaceSettings,
@@ -217,6 +219,75 @@ pub struct AssignAgent {
 #[ts(export)]
 pub struct CommentRequest {
     pub text: String,
+}
+
+// ---------------------------------------------------------------- team
+
+/// `PATCH /api/me` – any signed-in user edits their own profile.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateMe {
+    pub name: Option<String>,
+    /// One of `team::USER_AVATARS`.
+    pub avatar: Option<String>,
+    /// Requires `current_password`.
+    pub new_password: Option<String>,
+    pub current_password: Option<String>,
+}
+
+/// `POST /api/comments` [EditTickets]. Mentioning an agent with `RunAgents` permission
+/// starts a run of that agent on the ticket with the comment as instructions; the agent
+/// replies in the thread when it finishes.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateComment {
+    pub ticket_id: Option<Id>,
+    pub job_id: Option<Id>,
+    pub anchor: crate::team::CommentAnchor,
+    pub parent_id: Option<Id>,
+    pub body: String,
+}
+
+/// `PATCH /api/comments/:id` – author edits body; anyone with EditTickets resolves/reopens a root.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateComment {
+    pub body: Option<String>,
+    pub resolved: Option<bool>,
+}
+
+/// `POST /api/comments/:id/react` [View] – toggles the caller's reaction.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ReactRequest {
+    pub emoji: String,
+}
+
+/// `POST /api/notifications/read` – mark some (or all, when `ids` is None) as read.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MarkRead {
+    pub ids: Option<Vec<Id>>,
+}
+
+/// `POST /api/runners` – register a runner machine. Any member may add a Personal runner
+/// for themselves; Shared runners need ManageWorkspace.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateRunner {
+    pub name: String,
+    pub scope: crate::team::RunnerScope,
+    pub max_concurrent_runs: Option<u32>,
+}
+
+/// Returned once: the token is shown a single time.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RunnerToken {
+    pub runner: RunnerInfo,
+    pub token: String,
+    /// Ready-to-paste command, e.g. `boba-agent runner --server https://… --token …`.
+    pub command: String,
 }
 
 // ---------------------------------------------------------------- runs

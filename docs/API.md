@@ -92,3 +92,18 @@ Server → client `ServerMessage`, client → server `ClientMessage` (see `event
 | POST | `/api/command` [View] | `CommandRequest` → `Run` (plan arrives as `ServerMessage::CommandPlan`) |
 | POST | `/api/command/execute` [per action] | `ExecuteCommand` → `ActionResult[]` |
 | POST | `/api/speech/transcribe` [View] | audio body → `Transcript` (only with `SpeechProvider::Whisper`) |
+
+## Team
+| Method | Path | Body → Response |
+|---|---|---|
+| PATCH | `/api/me` [signed in] | `UpdateMe` → `User` |
+| GET | `/api/tickets/:id/comments` [View] | → `Comment[]` (all threads, oldest first) |
+| POST | `/api/comments` [EditTickets] | `CreateComment` → `Comment` (replaces `/api/tickets/:id/comment`) |
+| PATCH | `/api/comments/:id` [author / EditTickets for `resolved`] | `UpdateComment` → `Comment` |
+| DELETE | `/api/comments/:id` [author or Admin] | → 204 (soft delete) |
+| POST | `/api/comments/:id/react` [View] | `ReactRequest` → `Comment` |
+| GET | `/api/notifications?before=&limit=` [signed in] | → `Notification[]` |
+| POST | `/api/notifications/read` [signed in] | `MarkRead` → 204 |
+| POST | `/api/runners` [Member: personal, ManageWorkspace: shared] | `CreateRunner` → `RunnerToken` |
+| DELETE | `/api/runners/:id` [owner or ManageWorkspace] | → 204 (revokes the token) |
+| GET | `/api/runners/ws` | runner WebSocket, `Authorization: Bearer <runner token>`, `RunnerWire` |
