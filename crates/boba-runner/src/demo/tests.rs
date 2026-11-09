@@ -42,6 +42,8 @@ fn spec(kind: RunKind, mode: PermissionMode) -> RunSpec {
             default_branch: "main".into(),
             remote_url: Some("git@github.com:acme/app.git".into()),
             ai_attribution: true,
+            git_token: None,
+            git_author: None,
         }),
         mcp_servers: vec![],
         board_tools: None,

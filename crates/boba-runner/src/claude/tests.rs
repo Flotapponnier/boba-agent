@@ -100,6 +100,8 @@ fn spec(e: &Env, kind: RunKind) -> RunSpec {
             default_branch: "main".into(),
             remote_url: None,
             ai_attribution: true,
+            git_token: None,
+            git_author: None,
         }),
         mcp_servers: vec![],
         board_tools: None,

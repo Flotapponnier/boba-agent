@@ -382,6 +382,8 @@ async fn runs_need_a_remote_url_and_repos_are_cloned() {
         default_branch: "main".into(),
         remote_url: None,
         ai_attribution: true,
+        git_token: None,
+        git_author: None,
     });
     send(&mut ws, &RunnerWire::Start { spec: Box::new(s) }).await;
     match recv(&mut ws).await {
