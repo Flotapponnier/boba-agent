@@ -48,7 +48,7 @@ fn column_named(tab: &Tab, id: Option<Id>) -> Option<&Column> {
     id.and_then(|id| tab.columns.iter().find(|c| c.id == id))
 }
 
-fn status_for(kind: RunKind) -> AgentStatus {
+pub(crate) fn status_for(kind: RunKind) -> AgentStatus {
     match kind {
         RunKind::Work => AgentStatus::Working,
         RunKind::Review => AgentStatus::Reviewing,
@@ -116,13 +116,13 @@ async fn save_ticket(state: &SharedState, t: &Ticket) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn save_agent(state: &SharedState, a: &Agent) -> anyhow::Result<()> {
+pub(crate) async fn save_agent(state: &SharedState, a: &Agent) -> anyhow::Result<()> {
     state.db.save_agent(a).await?;
     state.upsert(Entity::Agent(a.clone()));
     Ok(())
 }
 
-async fn save_run(state: &SharedState, r: &Run) -> anyhow::Result<()> {
+pub(crate) async fn save_run(state: &SharedState, r: &Run) -> anyhow::Result<()> {
     state.db.save_run(r).await?;
     state.upsert(Entity::Run(r.clone()));
     Ok(())
@@ -152,7 +152,13 @@ async fn place(state: &SharedState, t: &mut Ticket, column: &Column) -> anyhow::
     Ok(())
 }
 
-async fn xp_effects(state: &SharedState, agent: &Agent, amount: u32, ups: &[u32], refs: Refs) {
+pub(crate) async fn xp_effects(
+    state: &SharedState,
+    agent: &Agent,
+    amount: u32,
+    ups: &[u32],
+    refs: Refs,
+) {
     state.fx(Fx::XpGained {
         agent_id: agent.id,
         amount,
@@ -472,24 +478,57 @@ async fn resolve_repo(
 
 async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
     let db = &state.db;
-    let ticket = run_ticket(db, run)
-        .await?
-        .ok_or_else(|| AppError::bad("this run has no ticket"))?;
     let agent = db
         .agent(run.agent_id)
         .await?
         .ok_or(AppError::NotFound("agent"))?;
     let mcp_servers = connector_servers_for(state, run, &agent).await?;
-    let tab = db
-        .tab(ticket.tab_id)
-        .await?
-        .ok_or(AppError::NotFound("tab"))?;
     let simulated = state
         .runners
         .by_id(run.runner_id)
         .ok_or_else(|| AppError::conflict("the runner of this run is gone"))?
         .simulated();
-    let repo = resolve_repo(state, &ticket, &tab, simulated).await?;
+
+    // What the run is about: a ticket, or a job (quest).
+    let (ticket_spec, job_spec, repo) = match run.job_id {
+        Some(job_id) => {
+            let job = db.job(job_id).await?.ok_or(AppError::NotFound("job"))?;
+            let repo = crate::jobs::job_repo(state, &job, simulated).await?;
+            let spec = boba_core::runner::JobSpec {
+                id: job.id,
+                name: job.name,
+                prompt: job.prompt,
+                output: job.output,
+                previous_result: job.last_result,
+            };
+            (None, Some(spec), repo)
+        }
+        None => {
+            let ticket = run_ticket(db, run)
+                .await?
+                .ok_or_else(|| AppError::bad("this run has no ticket"))?;
+            let tab = db
+                .tab(ticket.tab_id)
+                .await?
+                .ok_or(AppError::NotFound("tab"))?;
+            let repo = resolve_repo(state, &ticket, &tab, simulated).await?;
+            let spec = TicketSpec {
+                id: ticket.id,
+                number: ticket.number,
+                title: ticket.title,
+                body: ticket.body,
+                tags: ticket.tags,
+                branch: ticket.branch,
+                pr_number: ticket.pr_number,
+                pr_url: ticket.pr_url,
+                review_feedback: ticket.review_feedback,
+                review_rounds: ticket.review_rounds,
+                source: ticket.source.clone(),
+            };
+            (Some(spec), None, repo)
+        }
+    };
+
     let skills = db.skills().await?;
     let agent_skills: Vec<_> = agent
         .skill_ids
@@ -520,24 +559,12 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
             allowed_tools,
             max_turns: agent.max_turns,
         },
-        ticket: Some(TicketSpec {
-            id: ticket.id,
-            number: ticket.number,
-            title: ticket.title,
-            body: ticket.body,
-            tags: ticket.tags,
-            branch: ticket.branch,
-            pr_number: ticket.pr_number,
-            pr_url: ticket.pr_url,
-            review_feedback: ticket.review_feedback,
-            review_rounds: ticket.review_rounds,
-            source: ticket.source.clone(),
-        }),
-        job: None,
+        ticket: ticket_spec,
+        job: job_spec,
         command: None,
         repo,
-        // Connectors and board tools are wired in follow-up PRs.
         mcp_servers,
+        // Board tools are wired in a follow-up PR.
         board_tools: None,
         skill_paths,
         skill_names,
@@ -1189,7 +1216,10 @@ async fn finish_inner(
         // another review column, a failed review left in place for one retry), its
         // column's auto reviewer may pick it up.
         landed_in = Some(ticket.id);
-    } else if let Some(a) = agent.as_ref() {
+    } else if let Some(a) = agent.as_mut() {
+        if run.job_id.is_some() {
+            crate::jobs::on_job_run_finished_locked(state, &run, a).await?;
+        }
         save_agent(state, a).await?;
     }
 

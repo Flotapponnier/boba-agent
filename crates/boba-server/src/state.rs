@@ -303,8 +303,7 @@ impl AppState {
             history,
             settings: db.workspace_settings(self.cfg.demo_mode).await?,
             stats: self.stats().await?,
-            // Filled once the scheduler lands.
-            jobs: Vec::new(),
+            jobs: db.jobs().await?,
             connectors: crate::connectors::list(&self.db).await?,
         })
     }
