@@ -12,6 +12,7 @@ pub mod error;
 pub mod hub;
 pub mod notify;
 pub mod orchestrator;
+pub mod router;
 pub mod routes;
 pub mod seed;
 pub mod skills;
@@ -20,12 +21,10 @@ pub mod state;
 pub mod web;
 pub mod ws;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::{header, HeaderValue, Method};
 use axum::Router;
-use boba_runner::Runner;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -34,8 +33,11 @@ pub use config::Config;
 pub use state::{AppState, SharedState};
 
 /// Open the database, recover from a previous crash, discover skills and build the router.
-pub async fn build(cfg: Config, runner: Arc<dyn Runner>) -> anyhow::Result<(SharedState, Router)> {
-    let state = AppState::new(cfg, runner).await?;
+pub async fn build(
+    cfg: Config,
+    runners: impl Into<router::Runners>,
+) -> anyhow::Result<(SharedState, Router)> {
+    let state = AppState::new(cfg, runners.into()).await?;
     if let Err(e) = skills::rescan(&state).await {
         tracing::warn!(error = ?e, "initial skill scan failed");
     }
@@ -86,7 +88,11 @@ pub async fn shutdown_runs(state: &SharedState, grace: Duration) {
     }
     tracing::info!(runs = live.len(), "cancelling live runs before exit");
     for id in &live {
-        if let Err(e) = state.runner.cancel(*id).await {
+        let runner = match state.db.run(*id).await {
+            Ok(Some(run)) => state.runner_of(&run).clone(),
+            _ => state.runners.primary().clone(),
+        };
+        if let Err(e) = runner.cancel(*id).await {
             tracing::warn!(error = ?e, run_id = %id, "cancel on shutdown");
         }
     }

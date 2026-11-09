@@ -11,6 +11,7 @@ use boba_core::event::ServerMessage;
 use boba_core::runner::{RunOutcome, RunSpec, RunUpdate};
 use boba_core::*;
 use boba_runner::{Runner, UpdateTx};
+use boba_server::router::{RunnerSlot, Runners};
 use boba_server::{build, Config, SharedState};
 use futures::StreamExt;
 use reqwest::{Client, StatusCode};
@@ -220,8 +221,13 @@ fn tmp_dir() -> PathBuf {
 }
 
 async fn start_in(dir: PathBuf, runner: FakeRunner) -> Srv {
+    let r: Arc<dyn Runner> = Arc::new(runner.clone());
+    start_with(dir, Runners::from(r), runner).await
+}
+
+async fn start_with(dir: PathBuf, runners: Runners, runner: FakeRunner) -> Srv {
     let cfg = Config::for_tests(dir.clone());
-    let (state, app) = build(cfg, Arc::new(runner.clone())).await.unwrap();
+    let (state, app) = build(cfg, runners).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -317,7 +323,31 @@ impl Srv {
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        panic!("timed out waiting for {what}");
+        let s = self.snapshot(c).await;
+        let runs: Vec<_> = s
+            .runs
+            .iter()
+            .map(|r| (r.kind, r.status, r.error.clone(), r.ticket_id))
+            .collect();
+        let agents: Vec<_> = s
+            .agents
+            .iter()
+            .map(|a| (a.name.clone(), a.status))
+            .collect();
+        let tickets: Vec<_> = s
+            .tickets
+            .iter()
+            .filter(|t| t.agent_id.is_some() || t.review_rounds > 0)
+            .map(|t| {
+                (
+                    t.id,
+                    t.number,
+                    column_kind(&s, t),
+                    t.review_feedback.clone(),
+                )
+            })
+            .collect();
+        panic!("timed out waiting for {what}: runs={runs:?} agents={agents:?} tickets={tickets:?}");
     }
 }
 
@@ -1455,6 +1485,150 @@ async fn notifications_reach_only_their_owner() {
     srv.post(&member, "/notifications/read", json!({"ids": [theirs]}))
         .await;
     assert!(!srv.snapshot(&owner).await.notifications[0].read);
+
+async fn subscription_runner_only_runs_its_owners_work() {
+    use boba_core::team::{RunnerAuth, RunnerScope};
+    // The owner's Claude subscription (personal) + a simulated shared runner.
+    let personal = FakeRunner::new();
+    let shared = FakeRunner::new();
+    let mut slot = RunnerSlot::shared(Arc::new(personal.clone()), RunnerAuth::Subscription);
+    slot.scope = RunnerScope::Personal;
+    slot.owner_email = Some("owner@test.io".into());
+    let runners = Runners::new(vec![
+        slot,
+        RunnerSlot::shared(Arc::new(shared.clone()), RunnerAuth::Demo),
+    ]);
+    let srv = start_with(tmp_dir(), runners, personal.clone()).await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let owner_id = snap.me.as_ref().unwrap().id;
+    assert_eq!(snap.runners.len(), 2);
+    let card = snap.runners.iter().find(|r| r.id == personal.id).unwrap();
+    assert_eq!(
+        (card.scope, card.auth, card.owner_user_id),
+        (
+            RunnerScope::Personal,
+            RunnerAuth::Subscription,
+            Some(owner_id)
+        )
+    );
+
+    let tab = &snap.tabs[0];
+    // Real (non-simulated) runs need a repository.
+    let (st, repo) = srv
+        .post(&owner, "/repos", json!({"name": "app", "path": "/srv/app"}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "{repo}");
+    let (st, v) = srv
+        .req(
+            &owner,
+            "PATCH",
+            &format!("/tabs/{}", tab.id),
+            Some(json!({"repo_id": repo["id"]})),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let mine = snap.tickets.iter().find(|t| t.tab_id == tab.id).unwrap().id;
+    let theirs = snap
+        .tickets
+        .iter()
+        .filter(|t| t.tab_id == tab.id)
+        .nth(1)
+        .unwrap()
+        .id;
+    let dev = agent(&snap, "Boba Dev").id;
+    let qa = agent(&snap, "Golden QA").id;
+    let (st, v) = srv
+        .post(
+            &owner,
+            &format!("/tickets/{mine}/assign"),
+            json!({"agent_id": dev}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let (st, v) = srv
+        .post(
+            &member,
+            &format!("/tickets/{theirs}/assign"),
+            json!({"agent_id": qa}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    srv.until(&owner, "both approved", |s| {
+        [mine, theirs]
+            .iter()
+            .all(|t| column_kind(s, ticket(s, *t)) == ColumnKind::Done)
+            && all_idle(s)
+    })
+    .await;
+    let by = |r: &FakeRunner| -> Vec<(RunKind, Id)> {
+        r.specs()
+            .iter()
+            .map(|s| (s.kind, s.ticket.as_ref().unwrap().id))
+            .collect()
+    };
+    // Owner's work and its auto review: the subscription. Member's: the shared runner.
+    let p = by(&personal);
+    assert!(
+        p.contains(&(RunKind::Work, mine)) && p.contains(&(RunKind::Review, mine)),
+        "{p:?}"
+    );
+    assert!(
+        !p.iter().any(|(_, t)| *t == theirs),
+        "member work reached the subscription"
+    );
+    let sh = by(&shared);
+    assert!(
+        sh.contains(&(RunKind::Work, theirs)) && sh.contains(&(RunKind::Review, theirs)),
+        "{sh:?}"
+    );
+
+    // The member's runs say they were simulated and point at the shared runner.
+    let (_, runs) = srv.get(&member, &format!("/tickets/{theirs}/runs")).await;
+    let runs: Vec<Run> = serde_json::from_value(runs).unwrap();
+    assert!(runs.iter().all(|r| r.runner_id == Some(shared.id)));
+    let (_, logs) = srv
+        .get(&member, &format!("/runs/{}/logs", runs[1].id))
+        .await;
+    assert!(
+        logs[0]["text"].as_str().unwrap().starts_with("Simulated"),
+        "{logs}"
+    );
+    let (_, runs) = srv.get(&owner, &format!("/tickets/{mine}/runs")).await;
+    let runs: Vec<Run> = serde_json::from_value(runs).unwrap();
+    assert!(runs.iter().all(|r| r.runner_id == Some(personal.id)));
+    let (_, logs) = srv.get(&owner, &format!("/runs/{}/logs", runs[1].id)).await;
+    assert!(!logs[0]["text"].as_str().unwrap().starts_with("Simulated"));
+
+    // Cancels go to the runner that owns the run.
+    shared.hang(true);
+    let third = snap
+        .tickets
+        .iter()
+        .filter(|t| t.tab_id == tab.id)
+        .nth(2)
+        .unwrap()
+        .id;
+    let (_, run) = srv
+        .post(
+            &member,
+            &format!("/tickets/{third}/assign"),
+            json!({"agent_id": qa}),
+        )
+        .await;
+    let run_id: Id = serde_json::from_value(run["id"].clone()).unwrap();
+    srv.until(&member, "running", |s| {
+        s.runs
+            .iter()
+            .any(|r| r.id == run_id && r.status == RunStatus::Running)
+    })
+    .await;
+    srv.post(&member, &format!("/runs/{run_id}/cancel"), json!({}))
+        .await;
+    srv.until(&member, "cancelled", all_idle).await;
+    assert!(shared.script.lock().unwrap().cancelled.contains(&run_id));
+    assert!(personal.script.lock().unwrap().cancelled.is_empty());
 }
 
 #[tokio::test]

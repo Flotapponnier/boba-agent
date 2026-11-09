@@ -17,6 +17,12 @@ pub struct Config {
     pub secure_cookies: bool,
     /// `BOBA_ALLOW_BYPASS=1`: admins may give agents `bypassPermissions` (containers only).
     pub allow_bypass: bool,
+    /// `BOBA_CLAUDE_AUTH=subscription`: the local `claude` is signed in with a personal
+    /// Claude subscription (no API key). Its runner is then Personal.
+    pub claude_subscription: bool,
+    /// `BOBA_LOCAL_RUNNER_OWNER=<email>`: the built-in Claude runner only runs this user's
+    /// work (required with a subscription).
+    pub local_runner_owner: Option<String>,
 }
 
 impl Config {
@@ -32,10 +38,17 @@ impl Config {
         let data_dir = std::env::var("BOBA_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./data"));
+        // A shared server needs organisation credentials: a personal Claude subscription
+        // login must not be shared (Anthropic's terms). Whether the `claude` binary actually
+        // works is checked at startup (`main`), which falls back to demo mode otherwise.
         let has_key = env_set("ANTHROPIC_API_KEY")
+            || env_set("ANTHROPIC_AUTH_TOKEN")
             || env_set("CLAUDE_CODE_USE_BEDROCK")
             || env_set("CLAUDE_CODE_USE_VERTEX");
-        let demo_mode = env_set("BOBA_DEMO") || !(has_key && claude_on_path());
+        let claude_subscription = std::env::var("BOBA_CLAUDE_AUTH")
+            .map(|v| v.trim().eq_ignore_ascii_case("subscription"))
+            .unwrap_or(false);
+        let demo_mode = env_set("BOBA_DEMO") || !(has_key || claude_subscription);
         let public_url = std::env::var("BOBA_PUBLIC_URL")
             .unwrap_or_else(|_| format!("http://localhost:{port}"))
             .trim_end_matches('/')
@@ -53,6 +66,11 @@ impl Config {
             public_url,
             secure_cookies,
             allow_bypass: env_set("BOBA_ALLOW_BYPASS"),
+            claude_subscription,
+            local_runner_owner: std::env::var("BOBA_LOCAL_RUNNER_OWNER")
+                .ok()
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty()),
         }
     }
 
@@ -66,6 +84,8 @@ impl Config {
             public_url: "http://localhost".into(),
             secure_cookies: false,
             allow_bypass: false,
+            claude_subscription: false,
+            local_runner_owner: None,
         }
     }
 
@@ -78,14 +98,4 @@ fn env_set(key: &str) -> bool {
     std::env::var(key)
         .map(|v| !v.trim().is_empty() && v != "0")
         .unwrap_or(false)
-}
-
-fn claude_on_path() -> bool {
-    let Some(path) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path).any(|dir| {
-        let candidate = dir.join("claude");
-        candidate.is_file()
-    })
 }
