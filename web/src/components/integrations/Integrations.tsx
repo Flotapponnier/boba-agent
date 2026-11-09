@@ -8,6 +8,7 @@ import { toast } from '../../store/bus';
 import { useCan, useTabs } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
+import { UNAVAILABLE, useAvailable } from '../../store/features';
 
 function Toggle({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }) {
   return (
@@ -33,6 +34,7 @@ const RepoCard = memo(function RepoCard({ repo }: { repo: Repo }) {
   const [labelIn, setLabelIn] = useState('');
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const avail = useAvailable('sync');
   const dirty = JSON.stringify({ ...sync, last_synced_at: null, last_error: null }) !== JSON.stringify({ ...repo.sync, last_synced_at: null, last_error: null });
   useEffect(() => setSync((s) => ({ ...s, last_synced_at: repo.sync.last_synced_at, last_error: repo.sync.last_error })), [repo.sync.last_synced_at, repo.sync.last_error]);
   const set = <K extends keyof RepoSync>(k: K, v: RepoSync[K]) => setSync((s) => ({ ...s, [k]: v }));
@@ -135,12 +137,12 @@ const RepoCard = memo(function RepoCard({ repo }: { repo: Repo }) {
 
       <div className="row end" style={{ marginTop: 10 }}>
         {canManage && (
-          <button className="btn sm" disabled={!dirty || busy} onClick={() => void save()}>
+          <button className="btn sm" disabled={!avail || !dirty || busy} title={avail ? undefined : UNAVAILABLE} onClick={() => void save()}>
             Save
           </button>
         )}
         {canRun && (
-          <button className="btn gold sm" disabled={syncing || dirty} title={dirty ? 'Save first' : undefined} onClick={() => void syncNow()}>
+          <button className="btn gold sm" disabled={!avail || syncing || dirty} title={!avail ? UNAVAILABLE : dirty ? 'Save first' : undefined} onClick={() => void syncNow()}>
             {syncing ? '⟳ Syncing…' : '⟳ Sync now'}
           </button>
         )}

@@ -9,6 +9,7 @@ import { useAgentsList, useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { Modal } from '../ui/Overlay';
+import { UNAVAILABLE, useAvailable } from '../../store/features';
 import { Sprite } from '../ui/Sprite';
 
 const PortalCard = memo(function PortalCard({ c }: { c: Connector }) {
@@ -88,6 +89,7 @@ export function Portals() {
   const connectors = useBoard((s) => s.connectors);
   const show = useUi((u) => u.show);
   const canManage = useCan('manage_automations');
+  const avail = useAvailable('connectors');
   const list = Object.values(connectors).sort((a, b) => a.name.localeCompare(b.name));
   return (
     <section className="page wood" aria-label="Portals">
@@ -111,7 +113,7 @@ export function Portals() {
           </div>
           <div className="preset-grid">
             {PRESETS.map((p) => (
-              <button key={p.kind} className="preset" style={{ '--pc': p.color } as CSSProperties} onClick={() => show({ kind: 'portal-new', preset: p.kind })}>
+              <button key={p.kind} className="preset" disabled={!avail} title={avail ? undefined : UNAVAILABLE} style={{ '--pc': p.color } as CSSProperties} onClick={() => show({ kind: 'portal-new', preset: p.kind })}>
                 <span className="preset-ico">{p.icon}</span>
                 <b>{p.name}</b>
                 <small>{p.blurb}</small>

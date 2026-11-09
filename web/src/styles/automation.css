@@ -655,3 +655,14 @@
   border-left-color: #aaa;
   opacity: 0.75;
 }
+.sheet.soon {
+  background: #fff8dc;
+  border-style: dashed;
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+.preset:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}

@@ -9,6 +9,7 @@ import { toast } from '../../store/bus';
 import { useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { Modal } from '../ui/Overlay';
+import { UNAVAILABLE, useAvailable, useFeatures } from '../../store/features';
 
 const AUTH: Record<RunnerAuth, { label: string; tone: string }> = {
   api_key: { label: 'API key', tone: 'ok' },
@@ -88,6 +89,7 @@ function ConnectModal({ scope, onClose }: { scope: RunnerScope; onClose: () => v
     setBusy(true);
     const t = await attempt(() => api.createRunner({ name: name.trim(), scope, max_concurrent_runs: slots }));
     setBusy(false);
+    if (!t && useFeatures.getState().missing.runners) return onClose();
     if (t) {
       useBoard.getState().upsert({ entity: 'runner', data: t.runner });
       setToken(t);
@@ -154,6 +156,7 @@ export function RunnersPage() {
   const canWs = useCan('manage_workspace');
   const canRun = useCan('run_agents');
   const [connect, setConnect] = useState<RunnerScope | null>(null);
+  const avail = useAvailable('runners');
   const list = useMemo(() => Object.values(runners).sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name)), [runners]);
   const mine = list.filter((r) => r.scope === 'personal' && r.owner_user_id === me?.id);
   const shared = list.filter((r) => r.scope === 'shared');
@@ -169,12 +172,12 @@ export function RunnersPage() {
         </div>
         <div className="row">
           {canRun && (
-            <button className="btn gold" onClick={() => setConnect('personal')}>
+            <button className="btn gold" disabled={!avail} title={avail ? undefined : UNAVAILABLE} onClick={() => setConnect('personal')}>
               🔌 Connect my machine
             </button>
           )}
           {canWs && (
-            <button className="btn" onClick={() => setConnect('shared')}>
+            <button className="btn" disabled={!avail} title={avail ? undefined : UNAVAILABLE} onClick={() => setConnect('shared')}>
               + Shared runner
             </button>
           )}

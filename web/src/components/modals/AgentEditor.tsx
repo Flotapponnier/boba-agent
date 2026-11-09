@@ -1,7 +1,7 @@
 import { useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import type { PermissionMode } from '../../api/types';
 import { sfx } from '../../audio/audio';
-import { MODELS, ROLE_PRESETS, SPRITES, SWATCHES, asset } from '../../lib/game';
+import { COMMAND_PRESETS, MODELS, ROLE_PRESETS, SPRITES, SWATCHES, asset } from '../../lib/game';
 import { createAgent, updateAgent } from '../../store/actions';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
@@ -252,39 +252,56 @@ export function AgentEditor({ agentId }: { agentId?: string }) {
             </label>
           </div>
 
+          <div className="field" style={{ marginTop: 10 }}>
+            <span className="label">Allowed commands (run without asking)</span>
+            <div className="chips">
+              {COMMAND_PRESETS.map((p) => {
+                const on = p.tools.every((t) => f.allowed_tools.includes(t));
+                return (
+                  <button
+                    type="button"
+                    key={p.stack}
+                    className={`chip ${on ? 'on' : ''}`}
+                    aria-pressed={on}
+                    title={p.tools.join('\n')}
+                    onClick={() => set('allowed_tools', on ? f.allowed_tools.filter((t) => !p.tools.includes(t)) : [...new Set([...f.allowed_tools, ...p.tools])])}
+                  >
+                    {p.icon} {p.stack}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="chips" style={{ marginTop: 4 }}>
+              {f.allowed_tools.map((t) => (
+                <span key={t} className="chip x-able">
+                  <code>{t}</code>
+                  <button type="button" aria-label={`Remove ${t}`} onClick={() => set('allowed_tools', f.allowed_tools.filter((x) => x !== t))}>
+                    ×
+                  </button>
+                </span>
+              ))}
+              <input
+                value={toolIn}
+                onChange={(e) => setToolIn(e.target.value)}
+                placeholder="+ Bash(make check:*)"
+                style={{ width: 200, minHeight: 28, fontSize: 16 }}
+                aria-label="Add an allowed tool"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (toolIn.trim() && !f.allowed_tools.includes(toolIn.trim())) set('allowed_tools', [...f.allowed_tools, toolIn.trim()]);
+                    setToolIn('');
+                  }
+                }}
+              />
+            </div>
+            <span className="hint-text">In “Accept edits” mode, test and build commands otherwise stop the run on a permission prompt.</span>
+          </div>
           <button type="button" className="btn sm ghost" style={{ marginTop: 10 }} onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
             {advanced ? '▾' : '▸'} Advanced
           </button>
           {advanced && (
             <div style={{ marginTop: 8 }}>
-              <div className="field">
-                <span className="label">Extra allowed tools</span>
-                <div className="chips">
-                  {f.allowed_tools.map((t) => (
-                    <span key={t} className="chip x-able">
-                      <code>{t}</code>
-                      <button type="button" aria-label={`Remove ${t}`} onClick={() => set('allowed_tools', f.allowed_tools.filter((x) => x !== t))}>
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <div className="row">
-                  <input
-                    className="grow"
-                    value={toolIn}
-                    onChange={(e) => setToolIn(e.target.value)}
-                    placeholder="Bash(git diff:*)"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (toolIn.trim() && !f.allowed_tools.includes(toolIn.trim())) set('allowed_tools', [...f.allowed_tools, toolIn.trim()]);
-                        setToolIn('');
-                      }
-                    }}
-                  />
-                </div>
-              </div>
               <label className="field">
                 <span className="label">Max turns (empty = no limit)</span>
                 <input type="number" min={1} max={500} value={f.max_turns ?? ''} onChange={(e) => set('max_turns', e.target.value ? Number(e.target.value) : null)} />

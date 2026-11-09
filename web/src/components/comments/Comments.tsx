@@ -9,6 +9,7 @@ import { toast } from '../../store/bus';
 import { useAgentsList, useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
+import { UNAVAILABLE, useAvailable } from '../../store/features';
 
 const QUICK_EMOJI = ['👍', '🎉', '❤️', '👀', '🚀', '😂', '🧋', '🤔'];
 const MENTION_RE = /@\[([^\]]+)\]\((user|agent):([^)]+)\)/g;
@@ -447,7 +448,9 @@ export function Discussion({
   header?: ReactNode;
 }) {
   const all = useBoard((s) => s.comments);
-  const canEdit = useCan('edit_tickets');
+  const avail = useAvailable('comments');
+  const canEditTickets = useCan('edit_tickets');
+  const canEdit = canEditTickets && avail;
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     if (!ticketId) {
@@ -515,7 +518,8 @@ export function Discussion({
       {threads.map((t) => (
         <Thread key={t.root.id} root={t.root} replies={t.replies} ticketId={ticketId} jobId={jobId} onJump={onJump} focus={t.root.id === focusRoot} />
       ))}
-      {loaded && threads.length === 0 && <p className="muted">No discussion yet. Select text in the task or hover a transcript line to comment on it.</p>}
+      {!avail && <div className="sheet soon">🚧 Comments are {UNAVAILABLE.toLowerCase()}.</div>}
+      {loaded && avail && threads.length === 0 && <p className="muted">No discussion yet. Select text in the task or hover a transcript line to comment on it.</p>}
     </div>
   );
 }

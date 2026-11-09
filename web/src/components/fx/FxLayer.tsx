@@ -18,7 +18,14 @@ const rectOf = (el: Element | null | undefined): Rect | null => {
   return { x: r.left, y: r.top, w: r.width, h: r.height };
 };
 const center = (r: Rect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
-const ticketEl = (id: string) => document.querySelector(`[data-ticket="${id}"]`);
+/** The ticket paper, only if it is really visible (not hidden under a drawer or a modal). */
+const ticketEl = (id: string) => {
+  const el = document.querySelector(`[data-ticket="${id}"]`);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 30));
+  return hit && el.contains(hit) ? el : null;
+};
 const agentEl = (id: string) => document.querySelector(`[data-agent-face="${id}"]`) ?? document.querySelector(`[data-agent-card="${id}"]`);
 const later = (fn: () => void, ms = 60) => setTimeout(() => requestAnimationFrame(fn), ms);
 

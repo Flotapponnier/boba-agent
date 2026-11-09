@@ -8,6 +8,7 @@ import { useUi } from './ui';
 
 export function errorText(e: unknown): string {
   if (e instanceof ApiFailure) {
+    if (e.code === 'unavailable') return e.message;
     if (e.status === 403) return `Your role can't do that. ${e.message}`;
     return e.message;
   }
