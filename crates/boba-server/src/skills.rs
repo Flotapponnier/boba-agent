@@ -144,7 +144,8 @@ pub async fn rescan(state: &SharedState) -> anyhow::Result<Vec<Skill>> {
         .map(|r| r.path)
         .collect();
     match state
-        .runner
+        .runners
+        .primary()
         .discover_skills(&repo_paths, &dir.to_string_lossy())
         .await
     {

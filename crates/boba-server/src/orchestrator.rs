@@ -135,8 +135,10 @@ async fn broadcast_run(state: &SharedState, run_id: Id) {
 }
 
 async fn broadcast_runner(state: &SharedState) {
-    if let Ok(info) = state.runner_info().await {
-        state.upsert(Entity::Runner(info));
+    if let Ok(infos) = state.runner_infos().await {
+        for info in infos {
+            state.upsert(Entity::Runner(info));
+        }
     }
 }
 
@@ -292,10 +294,32 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
     } else {
         RunKind::Work
     });
+    // Route first: who is responsible decides which runner may execute it.
+    let started_by = match req.trigger {
+        Trigger::User(u) => Some(u),
+        Trigger::Auto => None,
+    };
+    let responsible = match started_by {
+        Some(u) => Some(u),
+        // Auto review: whoever started the ticket's latest work run.
+        None => db
+            .runs_for_ticket(ticket.id)
+            .await?
+            .iter()
+            .find(|r| r.kind == RunKind::Work)
+            .and_then(|r| r.started_by),
+    };
+    let slot = state.runners.route(db, responsible).await.ok_or_else(|| {
+        AppError::conflict(
+            "no runner is available for you: connect your own Claude Code to run agents",
+        )
+    })?;
+    let simulated = slot.simulated();
+    let runner_id = slot.id();
     if kind == RunKind::Review
         && ticket.pr_number.is_none()
         && ticket.branch.is_none()
-        && !state.cfg.demo_mode
+        && !simulated
     {
         return Err(AppError::bad(format!(
             "{} has no branch or pull request to review yet",
@@ -303,13 +327,9 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
         )));
     }
     // Validate that a repo exists before spending anything.
-    resolve_repo(state, &ticket, &tab).await?;
+    resolve_repo(state, &ticket, &tab, simulated).await?;
 
     let now = Utc::now();
-    let started_by = match req.trigger {
-        Trigger::User(u) => Some(u),
-        Trigger::Auto => None,
-    };
     let resume = match (&req.resume_session_id, kind) {
         (Some(s), _) => Some(s.clone()),
         (None, RunKind::Work) if ticket.review_rounds > 0 || ticket.branch.is_some() => {
@@ -324,7 +344,7 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
         agent_id: agent.id,
         kind,
         status: RunStatus::Queued,
-        runner_id: Some(state.runner.id()),
+        runner_id: Some(runner_id),
         branch: ticket.branch.clone(),
         worktree_path: None,
         session_id: None,
@@ -397,6 +417,16 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
         .await;
 
     state.init_seq(run.id).await?;
+    if simulated && state.runners.any_real() {
+        state
+            .server_log(
+                run.id,
+                LogKind::System,
+                "Simulated: this server's Claude Code only runs its owner's work. Connect your own Claude Code to run this for real.",
+                Some(json!({ "simulated": true })),
+            )
+            .await;
+    }
     if let Some(text) = &req.instructions {
         state
             .server_log(
@@ -412,11 +442,12 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
     Ok(db.run(run.id).await?.unwrap_or(run))
 }
 
-/// The repo a ticket run works in. `None` only in demo mode (simulated runs need no checkout).
+/// The repo a ticket run works in. `None` only for simulated runs (no checkout needed).
 async fn resolve_repo(
     state: &SharedState,
     ticket: &Ticket,
     tab: &Tab,
+    simulated: bool,
 ) -> AppResult<Option<RepoSpec>> {
     let repo_id = ticket.repo_id.or(tab.repo_id);
     let repo = match repo_id {
@@ -429,7 +460,7 @@ async fn resolve_repo(
             default_branch: r.default_branch,
             remote_url: r.remote_url,
         })),
-        None if state.cfg.demo_mode => Ok(None),
+        None if simulated => Ok(None),
         None => Err(AppError::bad(format!(
             "{} has no repository: pick one on the ticket or on the \"{}\" tab",
             tref(ticket),
@@ -452,7 +483,12 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         .tab(ticket.tab_id)
         .await?
         .ok_or(AppError::NotFound("tab"))?;
-    let repo = resolve_repo(state, &ticket, &tab).await?;
+    let simulated = state
+        .runners
+        .by_id(run.runner_id)
+        .ok_or_else(|| AppError::conflict("the runner of this run is gone"))?
+        .simulated();
+    let repo = resolve_repo(state, &ticket, &tab, simulated).await?;
     let skills = db.skills().await?;
     let skill_paths = agent
         .skill_ids
@@ -551,7 +587,11 @@ async fn dispatch_locked(state: &SharedState, run: Run) {
     let s2 = state.clone();
     let run_id = run.id;
     tokio::spawn(consume_boxed(s2, run_id, rx));
-    if let Err(e) = state.runner.start(spec, tx).await {
+    let Some(runner) = state.runner_of(&run).cloned() else {
+        fail_now_locked(state, run_id, "no runner available".into()).await;
+        return;
+    };
+    if let Err(e) = runner.start(spec, tx).await {
         tracing::warn!(error = ?e, %run_id, "runner refused to start the run");
         fail_now_locked(state, run_id, format!("runner could not start: {e}")).await;
     }
@@ -1239,7 +1279,11 @@ pub async fn cancel(state: &SharedState, run_id: Id, by: Id) -> AppResult<Run> {
         }
         run
     };
-    if let Err(e) = state.runner.cancel(run_id).await {
+    let cancelled = match state.runner_of(&run) {
+        Some(r) => r.cancel(run_id).await,
+        None => Err(anyhow::anyhow!("the runner of this run is gone")),
+    };
+    if let Err(e) = cancelled {
         tracing::warn!(error = ?e, %run_id, "runner cancel failed, forcing");
         let _g = state.orch_lock.lock().await;
         finish_locked(state, run_id, cancelled_outcome()).await?;
@@ -1286,7 +1330,8 @@ pub async fn message(state: &SharedState, run_id: Id, text: String, by: Id) -> A
         .unwrap_or(false);
     if !run.status.is_terminal() && live {
         state
-            .runner
+            .runner_of(&run)
+            .ok_or_else(|| AppError::conflict("the runner of this run is gone"))?
             .send_message(run_id, text.clone())
             .await
             .map_err(|e| AppError::conflict(format!("could not deliver the message: {e}")))?;
@@ -1335,7 +1380,8 @@ pub async fn answer_permission(
         return Err(AppError::conflict("this run has already finished"));
     }
     state
-        .runner
+        .runner_of(&run)
+        .ok_or_else(|| AppError::conflict("the runner of this run is gone"))?
         .answer_permission(run_id, request_id.clone(), allow)
         .await
         .map_err(|e| AppError::conflict(format!("could not answer: {e}")))?;
@@ -1371,7 +1417,9 @@ pub async fn abort_ticket_runs_locked(state: &SharedState, ticket_id: Id) -> any
         if run.status.is_terminal() {
             continue;
         }
-        let _ = state.runner.cancel(run.id).await;
+        if let Some(r) = state.runner_of(&run) {
+            let _ = r.cancel(run.id).await;
+        }
         finish_locked(state, run.id, cancelled_outcome()).await?;
     }
     Ok(())

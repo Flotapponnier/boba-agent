@@ -24,7 +24,7 @@ pub struct AppState {
     pub cfg: Config,
     pub db: Db,
     pub hub: Hub,
-    pub runner: Arc<dyn Runner>,
+    pub runners: crate::router::Runners,
     /// Serialises orchestration state transitions (assign, finish, review routing).
     pub orch_lock: Mutex<()>,
     /// Runs handed to the runner and not finished yet.
@@ -75,7 +75,7 @@ enum LogCmd {
 }
 
 impl AppState {
-    pub async fn new(cfg: Config, runner: Arc<dyn Runner>) -> anyhow::Result<SharedState> {
+    pub async fn new(cfg: Config, runners: crate::router::Runners) -> anyhow::Result<SharedState> {
         let db = Db::open(&cfg.data_dir).await?;
         crate::connectors::init_secret_key(&cfg.data_dir)?;
         let (tx, rx) = mpsc::channel(8192);
@@ -84,7 +84,7 @@ impl AppState {
             cfg,
             db,
             hub: Hub::new(),
-            runner,
+            runners,
             orch_lock: Mutex::new(()),
             live: StdMutex::new(HashSet::new()),
             seqs: StdMutex::new(HashMap::new()),
@@ -244,31 +244,22 @@ impl AppState {
 
     // ------------------------------------------------------------ snapshot
 
-    pub async fn runner_info(&self) -> anyhow::Result<RunnerInfo> {
-        let active = self
-            .db
-            .active_runs()
-            .await?
-            .iter()
-            .filter(|r| r.status != RunStatus::Queued)
-            .count() as u32;
-        Ok(RunnerInfo {
-            id: self.runner.id(),
-            name: self.runner.name().to_string(),
-            online: true,
-            max_concurrent_runs: self.runner.max_concurrent_runs(),
-            active_runs: active,
-            last_seen_at: Some(Utc::now()),
-            scope: boba_core::team::RunnerScope::Shared,
-            owner_user_id: None,
-            auth: if self.cfg.demo_mode {
-                boba_core::team::RunnerAuth::Demo
-            } else {
-                boba_core::team::RunnerAuth::ApiKey
-            },
-            host: None,
-            claude_version: None,
-        })
+    /// Every runner card, with live run counts.
+    pub async fn runner_infos(&self) -> anyhow::Result<Vec<RunnerInfo>> {
+        let mut active: std::collections::HashMap<Id, u32> = Default::default();
+        for r in self.db.active_runs().await? {
+            if r.status != RunStatus::Queued {
+                if let Some(id) = r.runner_id {
+                    *active.entry(id).or_default() += 1;
+                }
+            }
+        }
+        Ok(self.runners.infos(&self.db, &active).await)
+    }
+
+    /// The runner a run was routed to.
+    pub fn runner_of(&self, run: &Run) -> Option<&Arc<dyn Runner>> {
+        self.runners.by_id(run.runner_id).map(|s| &s.runner)
     }
 
     /// Full board state. Taken under the orchestrator lock so it never shows a half-applied
@@ -305,7 +296,7 @@ impl AppState {
             skills,
             repos,
             users,
-            runners: vec![self.runner_info().await?],
+            runners: self.runner_infos().await?,
             history,
             settings: db.workspace_settings(self.cfg.demo_mode).await?,
             stats: self.stats().await?,

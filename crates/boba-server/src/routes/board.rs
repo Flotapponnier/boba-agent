@@ -338,7 +338,7 @@ pub async fn create_repo(
         return Err(AppError::bad("repository name is required"));
     }
     let path = req.path.trim().to_string();
-    let local = req.runner_id.is_none() || req.runner_id == Some(state.runner.id());
+    let local = req.runner_id.is_none_or(|id| state.runners.contains(id));
     if local && !state.cfg.demo_mode {
         let p = std::path::Path::new(&path);
         if !p.is_absolute() {
