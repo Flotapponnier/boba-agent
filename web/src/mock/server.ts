@@ -38,11 +38,11 @@ import { defaultSync, mkId, seed, type MockState, type MockUser } from './seed';
 import { reviewScript, workScript, type Step } from './scripts';
 import { TOOLS, jobScript, plan } from './automation';
 import { describe as describeSchedule, nextRuns, validateCron } from '../lib/schedule';
-import type { CommandAction, CommandPlan, Connector, CreateConnector, CreateJob, Job, PlannedAction, Schedule, SyncReport, UpdateConnector, UpdateJob, UpdateRepo } from '../api/types';
+import type { Comment, CreateComment, CreateRunner, Notification, RunnerInfo, UpdateComment, UpdateMe, CommandAction, CommandPlan, Connector, CreateConnector, CreateJob, Job, PlannedAction, Schedule, SyncReport, UpdateConnector, UpdateJob, UpdateRepo } from '../api/types';
 
 const NOPE = Symbol('nope');
 
-const STORE_KEY = 'boba-mock-v5';
+const STORE_KEY = 'boba-mock-v7';
 const now = () => new Date().toISOString();
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
@@ -72,8 +72,8 @@ class MockServer implements Transport {
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private botsOn = true;
   private botPresence: PresenceUser[] = [
-    { user_id: 'u_mika', name: 'Mika', avatar: 'pinky_boba', tab_id: 'tab_dev' },
-    { user_id: 'u_sam', name: 'Sam', avatar: 'golden_boba', tab_id: 'tab_seo' },
+    { user_id: 'u_mika', name: 'Mika', avatar: 'pinky_boba_avatar', tab_id: 'tab_dev' },
+    { user_id: 'u_sam', name: 'Sam', avatar: 'golden_boba_avatar', tab_id: 'tab_seo' },
   ];
   speed = 1;
   private plans = new Map<string, PlannedAction[]>();
@@ -82,6 +82,7 @@ class MockServer implements Transport {
   constructor() {
     this.s = this.load();
     if (this.s.runs.length === 0 && this.s.users.length) this.seedRuns();
+    for (const t of this.s.tickets) this.recount(t.id, false);
     for (const r of this.s.runs) if (r.status === 'running' || r.status === 'queued' || r.status === 'waiting') this.resume(r);
     setInterval(() => this.tick(250), 250);
     setInterval(() => this.botTick(), 9000);
@@ -164,6 +165,7 @@ class MockServer implements Transport {
     this.sims.clear();
     this.s = seed();
     this.seedRuns();
+    for (const t of this.s.tickets) this.recount(t.id, false);
     this.broadcast({ type: 'snapshot', state: this.snapshot() });
     this.save();
   }
@@ -326,10 +328,10 @@ class MockServer implements Transport {
       tickets: this.s.tickets,
       runs: [...runs.values()],
       skills: this.s.skills,
-      notifications: [],
+      notifications: this.s.notifications.filter((n) => n.user_id === me?.id).slice(0, 80),
       repos: this.s.repos,
       users: this.s.users.map((u) => this.pub(u)),
-      runners: this.s.runners.map((r) => ({ ...r, active_runs: this.sims.size, last_seen_at: now() })),
+      runners: this.s.runners.map((r) => ({ ...r, active_runs: [...this.sims.keys()].filter((id) => this.s.runs.find((x) => x.id === id)?.runner_id === r.id).length, last_seen_at: r.online ? now() : r.last_seen_at })),
       jobs: this.s.jobs,
       connectors: this.s.connectors,
       history: this.s.history.slice(0, 100),
@@ -397,7 +399,7 @@ class MockServer implements Transport {
     if (key === 'POST /api/users/invite') {
       this.need('manage_users');
       if (this.s.users.some((u) => u.email === b.email)) throw new ApiFailure(409, 'This email is already a member.', 'conflict');
-      const u: MockUser = { id: mkId('u'), name: String(b.name), email: String(b.email), role: b.role as User['role'], avatar: pick(['boba', 'pinky_boba', 'golden_boba', 'black_boba', 'boba_diamond']), created_at: now(), activated: false };
+      const u: MockUser = { id: mkId('u'), name: String(b.name), email: String(b.email), role: b.role as User['role'], avatar: pick(['boba_avatar', 'pinky_boba_avatar', 'golden_boba_avatar', 'black_boba_avatar', 'diamond_boba_avatar']), created_at: now(), activated: false };
       this.s.users.push(u);
       const token = mkId('inv');
       this.s.invites[token] = u.id;
@@ -723,6 +725,8 @@ class MockServer implements Transport {
 
     const auto = this.routeAutomation(method, path, b);
     if (auto !== NOPE) return auto;
+    const team = this.routeTeam(method, path, q, b);
+    if (team !== NOPE) return team;
     throw new ApiFailure(404, `No mock route for ${method} ${path}`, 'not_found');
   }
 
@@ -826,7 +830,7 @@ class MockServer implements Transport {
       agent_id: a.id,
       kind,
       status: 'running',
-      runner_id: 'local',
+      runner_id: this.pickRunner(by),
       branch,
       worktree_path: `/data/worktrees/T-${t.number}`,
       session_id: resumeOf?.session_id ?? mkId('sess'),
@@ -921,6 +925,7 @@ class MockServer implements Transport {
           a.status = 'waiting';
           this.upsert({ entity: 'agent', data: a });
         }
+        this.notify(r.started_by, { kind: 'run_waiting', message: `${a?.name ?? 'An agent'} needs your permission to run ${step.tool} on T-${this.ticket(r.ticket_id)?.number ?? '?'}`, ticket_id: r.ticket_id, run_id: r.id, actor_agent_id: r.agent_id });
         this.hist('run_waiting', `${a?.name ?? 'An agent'} needs permission to run ${step.tool}`, { actor_kind: 'agent', actor_id: r.agent_id, agent_id: r.agent_id, ticket_id: r.ticket_id, run_id: r.id });
         continue;
       }
@@ -965,6 +970,11 @@ class MockServer implements Transport {
   }
 
   private finish(r: Run, status: 'failed' | 'cancelled', error: string | null = null) {
+    this.finishInner(r, status, error);
+    this.afterRun(r);
+  }
+
+  private finishInner(r: Run, status: 'failed' | 'cancelled', error: string | null = null) {
     this.sims.delete(r.id);
     r.status = status;
     r.ended_at = now();
@@ -996,6 +1006,11 @@ class MockServer implements Transport {
   }
 
   private complete(r: Run) {
+    this.completeInner(r);
+    this.afterRun(r);
+  }
+
+  private completeInner(r: Run) {
     if (r.kind === 'job') return this.completeJob(r);
     if (r.kind === 'command') return this.completeCommand(r);
     const t = this.ticket(r.ticket_id);
@@ -1471,6 +1486,221 @@ class MockServer implements Transport {
     return report;
   }
 
+  // ---------------------------------------------------------------- teamwork (accounts, comments, notifications, runners)
+  private mentionReplies = new Map<string, string>(); // run id -> thread root id
+
+  private pickRunner(by: string | null): string {
+    const mine = this.s.runners.find((r) => r.scope === 'personal' && r.owner_user_id === by && r.online);
+    return mine?.id ?? 'local';
+  }
+
+  private notify(userId: string | null | undefined, n: Partial<Notification> & { kind: Notification['kind']; message: string }) {
+    if (!userId) return;
+    const full: Notification = { id: mkId('nt'), user_id: userId, ticket_id: null, comment_id: null, run_id: null, job_id: null, actor_user_id: null, actor_agent_id: null, read: false, created_at: now(), ...n };
+    this.s.notifications.unshift(full);
+    if (this.s.notifications.length > 300) this.s.notifications.length = 300;
+    // Sent only to its owner: in the mock, only "me" has a socket.
+    if (userId === this.me()?.id) this.upsert({ entity: 'notification', data: full });
+    else this.save();
+  }
+
+  private afterRun(r: Run) {
+    const a = this.agent(r.agent_id);
+    const t = this.ticket(r.ticket_id);
+    if (r.kind === 'work' || r.kind === 'review') {
+      const what = r.status === 'succeeded' ? (r.kind === 'review' ? `${a?.name} ${r.verdict === 'approved' ? 'approved' : 'requested changes on'} T-${t?.number}` : `${a?.name} finished T-${t?.number}`) : `${a?.name} ${r.status === 'failed' ? 'failed' : 'was stopped'} on T-${t?.number}`;
+      this.notify(r.started_by, { kind: r.status === 'failed' ? 'run_failed' : 'run_finished', message: what, ticket_id: r.ticket_id, run_id: r.id, actor_agent_id: r.agent_id });
+      if (r.kind === 'review' && r.status === 'succeeded' && t?.created_by && t.created_by !== r.started_by)
+        this.notify(t.created_by, { kind: 'review_verdict', message: `${a?.name} ${r.verdict === 'approved' ? 'approved' : 'requested changes on'} T-${t.number}`, ticket_id: t.id, run_id: r.id, actor_agent_id: r.agent_id });
+    }
+    if (r.kind === 'job' && r.status === 'succeeded') {
+      const j = this.s.jobs.find((x) => x.id === r.job_id);
+      if (j) this.notify(j.created_by, { kind: 'job_result', message: `Quest "${j.name}" finished: ${r.summary ?? 'done'}`, job_id: j.id, run_id: r.id, actor_agent_id: r.agent_id });
+    }
+    // The agent answers in the thread that mentioned it.
+    const root = this.mentionReplies.get(r.id);
+    if (root) {
+      this.mentionReplies.delete(r.id);
+      const rootC = this.s.comments.find((c) => c.id === root);
+      if (rootC) {
+        const body = r.status === 'succeeded' ? `Done ✅ ${r.summary ?? ''}`.trim() : r.status === 'failed' ? `I got stuck: ${r.error ?? 'unknown error'}` : 'Someone called me back before I finished.';
+        const c: Comment = { ...this.blankComment(), ticket_id: rootC.ticket_id, job_id: rootC.job_id, anchor: rootC.anchor, parent_id: root, author_kind: 'agent', author_id: r.agent_id, body };
+        this.s.comments.push(c);
+        this.upsert({ entity: 'comment', data: c });
+        this.recount(c.ticket_id);
+        for (const uid of this.threadPeople(root)) this.notify(uid, { kind: 'reply', message: `${a?.name} replied in a thread on T-${t?.number}`, ticket_id: c.ticket_id, comment_id: c.id, actor_agent_id: r.agent_id });
+      }
+    }
+  }
+
+  /** Server-maintained badge counters on the ticket paper. */
+  private recount(ticketId: string | null, broadcast = true) {
+    const t = this.ticket(ticketId);
+    if (!t) return;
+    const cs = this.s.comments.filter((c) => c.ticket_id === t.id && !c.deleted);
+    const next = { comment_count: cs.length, open_thread_count: cs.filter((c) => !c.parent_id && !c.resolved).length };
+    if (next.comment_count === t.comment_count && next.open_thread_count === t.open_thread_count) return;
+    Object.assign(t, next);
+    if (broadcast) this.upsert({ entity: 'ticket', data: t });
+  }
+
+  private blankComment(): Comment {
+    return { id: mkId('cm'), ticket_id: null, job_id: null, anchor: { on: 'ticket' }, parent_id: null, author_kind: 'user', author_id: this.me()?.id ?? '', body: '', mentioned_user_ids: [], mentioned_agent_ids: [], triggered_run_ids: [], reactions: [], resolved: false, resolved_by: null, created_at: now(), edited_at: null, deleted: false };
+  }
+
+  private threadPeople(rootId: string): string[] {
+    const ids = new Set<string>();
+    for (const c of this.s.comments) if ((c.id === rootId || c.parent_id === rootId) && c.author_kind === 'user') ids.add(c.author_id);
+    return [...ids];
+  }
+
+  private postComment(authorId: string, b: CreateComment): Comment {
+    const author = this.s.users.find((u) => u.id === authorId);
+    const body = String(b.body ?? '').trim();
+    if (!body) throw new ApiFailure(400, 'Write something first.', 'bad_request');
+    const t = this.ticket(b.ticket_id);
+    if (b.ticket_id && !t) throw new ApiFailure(404, 'Ticket not found.', 'not_found');
+    const users = new Set<string>();
+    const agents = new Set<string>();
+    for (const m of body.matchAll(/@\[[^\]]+\]\((user|agent):([^)]+)\)/g)) (m[1] === 'user' ? users : agents).add(m[2] as string);
+    const c: Comment = { ...this.blankComment(), author_id: authorId, ticket_id: b.ticket_id, job_id: b.job_id, anchor: b.anchor, parent_id: b.parent_id, body, mentioned_user_ids: [...users], mentioned_agent_ids: [...agents] };
+    const root = b.parent_id ?? c.id;
+    // Agent mentions start runs (needs RunAgents), with the comment as instructions.
+    if (t && agents.size && grants(author?.role, 'run_agents')) {
+      for (const aid of agents) {
+        try {
+          const run = this.assign(t, aid, body.replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'), authorId);
+          c.triggered_run_ids.push(run.id);
+          this.mentionReplies.set(run.id, root);
+        } catch (e) {
+          // Busy agent: say so in the thread right away.
+          const a = this.agent(aid);
+          setTimeout(() => {
+            const reply: Comment = { ...this.blankComment(), ticket_id: c.ticket_id, anchor: c.anchor, parent_id: root, author_kind: 'agent', author_id: aid, body: `I'm busy right now (${e instanceof Error ? e.message : 'busy'}). Mention me again when I'm back in the tavern.` };
+            this.s.comments.push(reply);
+            this.upsert({ entity: 'comment', data: reply });
+          }, 600);
+          void a;
+        }
+      }
+    }
+    this.s.comments.push(c);
+    this.upsert({ entity: 'comment', data: c });
+    this.recount(c.ticket_id);
+    const where = t ? `T-${t.number} ${t.title}` : 'a quest';
+    for (const uid of users) if (uid !== authorId) this.notify(uid, { kind: 'mention', message: `${author?.name ?? 'Someone'} mentioned you on ${where}`, ticket_id: c.ticket_id, job_id: c.job_id, comment_id: c.id, actor_user_id: authorId });
+    if (b.parent_id) for (const uid of this.threadPeople(b.parent_id)) if (uid !== authorId && !users.has(uid)) this.notify(uid, { kind: 'reply', message: `${author?.name ?? 'Someone'} replied in a thread on ${where}`, ticket_id: c.ticket_id, job_id: c.job_id, comment_id: c.id, actor_user_id: authorId });
+    this.hist('comment', `${author?.name ?? 'Someone'} commented on ${where}`, { actor_id: authorId, ticket_id: c.ticket_id, data: { comment_id: c.id } });
+    return c;
+  }
+
+  private routeTeam(method: string, path: string, q: URLSearchParams, b: Record<string, unknown>): unknown {
+    const m = (re: RegExp) => path.match(re);
+    let x: RegExpMatchArray | null;
+    const key = `${method} ${path}`;
+
+    if (key === 'PATCH /api/me') {
+      const me = this.me();
+      if (!me) throw new ApiFailure(401, 'Please log in first.', 'unauthorized');
+      const u = b as Partial<UpdateMe>;
+      if (u.new_password && !u.current_password) throw new ApiFailure(400, 'Type your current password to change it.', 'bad_request');
+      if (u.name) me.name = u.name.trim();
+      if (u.avatar) me.avatar = u.avatar;
+      this.upsert({ entity: 'user', data: this.pub(me) });
+      this.presence();
+      return this.pub(me);
+    }
+    if ((x = m(/^\/api\/tickets\/([^/]+)\/comments$/)) && method === 'GET') {
+      this.need('view');
+      return this.s.comments.filter((c) => c.ticket_id === x![1]).sort((a, b2) => a.created_at.localeCompare(b2.created_at));
+    }
+    if (key === 'POST /api/comments') {
+      const me = this.need('edit_tickets');
+      return this.postComment(me.id, b as unknown as CreateComment);
+    }
+    if ((x = m(/^\/api\/comments\/([^/]+)(?:\/(react))?$/))) {
+      const me = this.need('view');
+      const c = this.s.comments.find((y) => y.id === x![1]);
+      if (!c) throw new ApiFailure(404, 'Comment not found.', 'not_found');
+      if (x[2] === 'react') {
+        const emoji = String(b.emoji ?? '👍');
+        let r = c.reactions.find((y) => y.emoji === emoji);
+        if (!r) c.reactions.push((r = { emoji, user_ids: [] }));
+        r.user_ids = r.user_ids.includes(me.id) ? r.user_ids.filter((u) => u !== me.id) : [...r.user_ids, me.id];
+        c.reactions = c.reactions.filter((y) => y.user_ids.length);
+        this.upsert({ entity: 'comment', data: c });
+        return c;
+      }
+      if (method === 'PATCH') {
+        const u = b as Partial<UpdateComment>;
+        if (u.body != null) {
+          if (c.author_id !== me.id) throw new ApiFailure(403, 'You can only edit your own comments.', 'forbidden');
+          c.body = u.body;
+          c.edited_at = now();
+        }
+        if (u.resolved != null) {
+          this.need('edit_tickets');
+          c.resolved = u.resolved;
+          c.resolved_by = u.resolved ? me.id : null;
+        }
+        this.upsert({ entity: 'comment', data: c });
+        this.recount(c.ticket_id);
+        return c;
+      }
+      if (method === 'DELETE') {
+        if (c.author_id !== me.id && !grants(me.role, 'manage_users')) throw new ApiFailure(403, 'You can only delete your own comments.', 'forbidden');
+        c.deleted = true;
+        c.body = '';
+        this.upsert({ entity: 'comment', data: c });
+        this.recount(c.ticket_id);
+        return undefined;
+      }
+    }
+    if (key === 'GET /api/notifications') {
+      const me = this.need('view');
+      const before = q.get('before');
+      return this.s.notifications.filter((n) => n.user_id === me.id && (!before || n.created_at < before)).slice(0, Number(q.get('limit') ?? 50));
+    }
+    if (key === 'POST /api/notifications/read') {
+      const me = this.need('view');
+      const ids = (b.ids as string[] | null) ?? null;
+      for (const n of this.s.notifications) if (n.user_id === me.id && (!ids || ids.includes(n.id))) n.read = true;
+      this.save();
+      return undefined;
+    }
+    if (key === 'POST /api/runners') {
+      const me = this.need('view');
+      const c = b as unknown as CreateRunner;
+      if (c.scope === 'shared') this.need('manage_workspace');
+      else this.need('run_agents');
+      const r: RunnerInfo = { id: mkId('rn'), name: c.name, online: false, max_concurrent_runs: c.max_concurrent_runs ?? 2, active_runs: 0, last_seen_at: null, scope: c.scope, owner_user_id: c.scope === 'personal' ? me.id : null, auth: 'unknown', host: null, claude_version: null };
+      this.s.runners.push(r);
+      this.upsert({ entity: 'runner', data: r });
+      const token = `brt_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+      // Simulate the machine connecting a few seconds later.
+      setTimeout(() => {
+        r.online = true;
+        r.auth = c.scope === 'personal' ? 'subscription' : 'api_key';
+        r.host = c.scope === 'personal' ? `${me.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-laptop` : 'vps-2';
+        r.claude_version = '2.1.319';
+        r.last_seen_at = now();
+        this.upsert({ entity: 'runner', data: r });
+        this.notify(me.id, { kind: 'account', message: `${r.name} is connected. Your runs now use your own Claude Code.` });
+      }, 4000);
+      return { runner: r, token, command: `boba-agent runner --server ${location.origin} --token ${token}` };
+    }
+    if ((x = m(/^\/api\/runners\/([^/]+)$/)) && method === 'DELETE') {
+      const me = this.need('view');
+      const r = this.s.runners.find((y) => y.id === x![1]);
+      if (!r) throw new ApiFailure(404, 'Runner not found.', 'not_found');
+      if (r.owner_user_id !== me.id) this.need('manage_workspace');
+      this.s.runners = this.s.runners.filter((y) => y !== r);
+      this.del('runner', r.id);
+      return undefined;
+    }
+    return NOPE;
+  }
+
   // ---------------------------------------------------------------- demo teammates
   private botTick() {
     if (!this.botsOn) return;
@@ -1478,7 +1708,24 @@ class MockServer implements Transport {
     if (Math.random() < 0.5) b.tab_id = pick(this.s.tabs).id;
     this.presence();
     if (Math.random() < 0.18) this.botAssign(false);
+    else if (Math.random() < 0.08) this.botComment();
   }
+  private botComment() {
+    const me = this.me();
+    const t = pick(this.s.tickets.filter((x) => x.tab_id === 'tab_dev'));
+    if (!me || !t) return;
+    const lines = [
+      `@[${me.name}](user:${me.id}) can you take a look at this one? I think it blocks the release.`,
+      `Looks good to me. @[${me.name}](user:${me.id}) ok to ship?`,
+      `I added more context in the description, @[${me.name}](user:${me.id}).`,
+    ];
+    try {
+      this.postComment('u_mika', { ticket_id: t.id, job_id: null, anchor: { on: 'ticket' }, parent_id: null, body: pick(lines) });
+    } catch {
+      /* ignore */
+    }
+  }
+
   private botAssign(force: boolean) {
     if (!this.botsOn || !this.me()) return;
     const busy = this.s.runs.filter((r) => r.status === 'running' || r.status === 'waiting').length;

@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../api/client';
 import { connection } from '../../api/connection';
 import type { Run, RunLogLine } from '../../api/types';
@@ -8,6 +8,8 @@ import { isActive, useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { Markdown } from '../ui/Markdown';
 import { Sprite } from '../ui/Sprite';
+import { runnerLabel } from '../../lib/runner';
+import { useUi } from '../../store/ui';
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === 'object' ? (v as Obj) : {});
@@ -175,8 +177,49 @@ function UserLine({ line }: { line: RunLogLine }) {
   );
 }
 
+function RunnerBadge({ run }: { run: Run }) {
+  const runners = useBoard((s) => s.runners);
+  const users = useBoard((s) => s.users);
+  const setView = useUi((u) => u.setView);
+  const open = useUi((u) => u.open);
+  const me = useBoard((s) => s.me?.id);
+  const l = runnerLabel(run, runners, users);
+  if (!l) return null;
+  return (
+    <div className={`runner-badge ${l.real ? 'real' : 'sim'}`} title={l.hint}>
+      <span>{l.real ? '⚡' : '🎭'} {l.text}</span>
+      {!l.real && run.started_by === me && (
+        <button
+          className="link-btn"
+          onClick={() => {
+            open(null);
+            setView('runners');
+          }}
+        >
+          Connect your own Claude Code to run it for real →
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Live transcript of one run: text, collapsed thinking, tool cards, permission prompts. */
-export function RunView({ run, onSwitchRun }: { run: Run; onSwitchRun?: (id: string) => void }) {
+export function RunView({
+  run,
+  onSwitchRun,
+  lineCounts,
+  focusSeq,
+  onCommentLine,
+  onCommentRun,
+}: {
+  run: Run;
+  onSwitchRun?: (id: string) => void;
+  lineCounts?: Record<number, number>;
+  focusSeq?: number;
+  onCommentLine?: (seq: number) => void;
+  onCommentRun?: () => void;
+}) {
+  const canComment = useCan('edit_tickets');
   const lines = useBoard((s) => s.logs[run.id]);
   const agent = useBoard((s) => s.agents[run.agent_id]);
   const canRun = useCan('run_agents');
@@ -217,6 +260,19 @@ export function RunView({ run, onSwitchRun }: { run: Run; onSwitchRun?: (id: str
     if (el && stick) el.scrollTop = el.scrollHeight;
   }, [items, stick]);
 
+  // Jump to a commented line.
+  useEffect(() => {
+    if (focusSeq === undefined) return;
+    const t = setTimeout(() => {
+      const el = box.current?.querySelector(`[data-seq="${focusSeq}"]`);
+      if (el) {
+        setStick(false);
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [focusSeq, lines?.length]);
+
   const onScroll = () => {
     const el = box.current;
     if (el) setStick(el.scrollTop + el.clientHeight >= el.scrollHeight - 24);
@@ -232,6 +288,51 @@ export function RunView({ run, onSwitchRun }: { run: Run; onSwitchRun?: (id: str
       setMsg('');
       setStick(true);
       if (r.id !== run.id) onSwitchRun?.(r.id);
+    }
+  };
+
+  const renderLine = (l: RunLogLine, i: number): ReactNode => {
+    switch (l.kind) {
+      case 'text':
+        return <Verdict key={l.seq} text={l.text} />;
+      case 'thinking':
+        return (
+          <details key={l.seq} className="l-thinking">
+            <summary>Thinking…</summary>
+            {l.text}
+          </details>
+        );
+      case 'tool_use':
+        return <ToolCard key={l.seq} use={l} result={items.results.get(str(obj(l.data).id))} defaultOpen={active && i === lastToolIdx} />;
+      case 'tool_result': {
+        const id = str(obj(l.data).tool_use_id);
+        // Orphan results (no matching tool_use) still show.
+        return items.ls.some((u) => u.kind === 'tool_use' && str(obj(u.data).id) === id) ? null : (
+          <pre key={l.seq} className="l-system">
+            {l.text}
+          </pre>
+        );
+      }
+      case 'system': {
+        const d = obj(l.data);
+        if (d.permission_request) return <PermissionCard key={l.seq} line={l} run={run} resolved={items.resolved.get(str(obj(d.permission_request).request_id))} />;
+        if (d.permission_resolved) return null;
+        return (
+          <div key={l.seq} className="l-system">
+            {l.text}
+          </div>
+        );
+      }
+      case 'error':
+        return (
+          <div key={l.seq} className="l-error">
+            {l.text}
+          </div>
+        );
+      case 'user':
+        return <UserLine key={l.seq} line={l} />;
+      default:
+        return null;
     }
   };
 
@@ -253,6 +354,7 @@ export function RunView({ run, onSwitchRun }: { run: Run; onSwitchRun?: (id: str
           </div>
           <span className={`run-status ${run.status}`}>{STATUS_LABEL[run.status]}</span>
         </div>
+        <RunnerBadge run={run} />
         {active && (
           <div className="bar" style={{ '--c': agent?.color ?? '#f39c12', marginTop: 0 } as React.CSSProperties}>
             <i style={{ width: `${Math.max(3, Math.round(run.progress * 100))}%` }} />
@@ -276,60 +378,41 @@ export function RunView({ run, onSwitchRun }: { run: Run; onSwitchRun?: (id: str
           {run.verdict && <span className={`verdict ${run.verdict}`}>{run.verdict === 'approved' ? 'APPROVED' : 'CHANGES REQUESTED'}</span>}
         </div>
         {run.error && <div className="form-error">⚠ {run.error}</div>}
-        {active && canRun && (
-          <div className="row">
+        <div className="row">
+          {active && canRun && (
             <button className="btn red sm" onClick={() => void cancelRun(run.id)}>
               ⏹ Call {agent?.name ?? 'the agent'} back
             </button>
-          </div>
-        )}
+          )}
+          {canComment && onCommentRun && (
+            <button className="btn sm ghost" onClick={onCommentRun} title="Start a thread about this run (verdict, report…)">
+              💬 Discuss this {run.kind === 'review' ? 'review' : run.kind === 'job' ? 'report' : 'run'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="transcript" ref={box} onScroll={onScroll} aria-live={active ? 'polite' : 'off'} aria-label="Transcript">
         {items.ls.length === 0 && <div className="l-system">{active ? 'Waiting for the first words…' : 'No transcript for this run.'}</div>}
         {items.ls.map((l, i) => {
-          switch (l.kind) {
-            case 'text':
-              return <Verdict key={l.seq} text={l.text} />;
-            case 'thinking':
-              return (
-                <details key={l.seq} className="l-thinking">
-                  <summary>Thinking…</summary>
-                  {l.text}
-                </details>
-              );
-            case 'tool_use':
-              return <ToolCard key={l.seq} use={l} result={items.results.get(str(obj(l.data).id))} defaultOpen={active && i === lastToolIdx} />;
-            case 'tool_result': {
-              const id = str(obj(l.data).tool_use_id);
-              // Orphan results (no matching tool_use) still show.
-              return items.ls.some((u) => u.kind === 'tool_use' && str(obj(u.data).id) === id) ? null : (
-                <pre key={l.seq} className="l-system">
-                  {l.text}
-                </pre>
-              );
-            }
-            case 'system': {
-              const d = obj(l.data);
-              if (d.permission_request) return <PermissionCard key={l.seq} line={l} run={run} resolved={items.resolved.get(str(obj(d.permission_request).request_id))} />;
-              if (d.permission_resolved) return null;
-              return (
-                <div key={l.seq} className="l-system">
-                  {l.text}
-                </div>
-              );
-            }
-            case 'error':
-              return (
-                <div key={l.seq} className="l-error">
-                  {l.text}
-                </div>
-              );
-            case 'user':
-              return <UserLine key={l.seq} line={l} />;
-            default:
-              return null;
-          }
+          const node = renderLine(l, i);
+          if (!node) return null;
+          const n = lineCounts?.[l.seq];
+          return (
+            <div key={l.seq} className={`tl ${focusSeq === l.seq ? 'focus' : ''}`} data-seq={l.seq}>
+              {node}
+              {n ? (
+                <button className="tl-n" onClick={() => onCommentLine?.(l.seq)} title={`${n} comment(s) on this line`}>
+                  💬 {n}
+                </button>
+              ) : null}
+              {canComment && onCommentLine && (
+                <button className="tl-c" onClick={() => onCommentLine(l.seq)} aria-label="Comment on this line" title="Comment on this line">
+                  💬
+                </button>
+              )}
+            </div>
+          );
         })}
         {!stick && (
           <button className="jump-live" onClick={() => setStick(true)}>

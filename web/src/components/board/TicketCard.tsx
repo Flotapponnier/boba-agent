@@ -8,6 +8,7 @@ import { fxBus } from '../../store/bus';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { Sprite } from '../ui/Sprite';
+import { useCommentCount } from '../comments/Comments';
 
 const plain = (md: string) =>
   md
@@ -37,6 +38,9 @@ export const TicketPaper = memo(function TicketPaper({ ticket: t, overlay, run, 
   const worker = useBoard((s) => s.agents[run?.agent_id ?? (col?.kind === 'done' ? t.agent_id ?? '' : '')]);
   const reviewer = useBoard((s) => (col?.auto_reviewer_agent_id ? s.agents[col.auto_reviewer_agent_id] : undefined));
   const kind = col?.kind;
+  // Server counter is authoritative; the store count covers comments that arrived before the ticket upsert.
+  const loaded = useCommentCount(t.id);
+  const comments = Math.max(t.comment_count, loaded);
   const active = !!run;
   const failed = t.review_feedback?.startsWith('Run failed');
   const style = {
@@ -124,6 +128,11 @@ export const TicketPaper = memo(function TicketPaper({ ticket: t, overlay, run, 
             </span>
           ))}
         </div>
+        {comments > 0 && (
+          <span className={`c-badge ${t.open_thread_count ? 'open' : ''}`} title={`${comments} comment${comments > 1 ? 's' : ''}${t.open_thread_count ? `, ${t.open_thread_count} open thread${t.open_thread_count > 1 ? 's' : ''}` : ''}`}>
+            💬 {comments}
+          </span>
+        )}
         {worker && (
           <span className="worker" data-ticket-worker={t.id}>
             <Sprite sprite={worker.sprite} color={worker.color} status={active ? worker.status : 'idle'} size={34} />

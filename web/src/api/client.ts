@@ -44,6 +44,13 @@ import type {
   UpdateConnector,
   UpdateJob,
   UpdateRepo,
+  Comment,
+  CreateComment,
+  CreateRunner,
+  Notification,
+  RunnerToken,
+  UpdateComment,
+  UpdateMe,
 } from './types';
 import { httpTransport, type Transport } from './transport';
 
@@ -124,4 +131,15 @@ export const api = {
   command: (b: CommandRequest) => req<Run>('POST', '/api/command', b),
   executeCommand: (runId: string, actions: CommandAction[]) => req<ActionResult[]>('POST', '/api/command/execute', { run_id: runId, actions }),
   transcribe: (audio: Blob) => transport.upload<Transcript>('/api/speech/transcribe', audio),
+
+  updateMe: (b: Partial<UpdateMe>) => req<User>('PATCH', '/api/me', b),
+  comments: (ticketId: string) => req<Comment[]>('GET', `/api/tickets/${ticketId}/comments`),
+  createComment: (b: CreateComment) => req<Comment>('POST', '/api/comments', b),
+  updateComment: (id: string, b: Partial<UpdateComment>) => req<Comment>('PATCH', `/api/comments/${id}`, b),
+  deleteComment: (id: string) => req<void>('DELETE', `/api/comments/${id}`),
+  react: (id: string, emoji: string) => req<Comment>('POST', `/api/comments/${id}/react`, { emoji }),
+  notifications: (before?: string, limit = 50) => req<Notification[]>('GET', `/api/notifications${qs({ before, limit })}`),
+  markRead: (ids: string[] | null) => req<void>('POST', '/api/notifications/read', { ids }),
+  createRunner: (b: CreateRunner) => req<RunnerToken>('POST', '/api/runners', b),
+  deleteRunner: (id: string) => req<void>('DELETE', `/api/runners/${id}`),
 };

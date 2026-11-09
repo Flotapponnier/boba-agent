@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { api, getTransport } from '../api/client';
-import { connection } from '../api/connection';
-import { PEARL, asset, avatarUrl } from '../lib/game';
+import { getTransport } from '../api/client';
+import { PEARL, asset, portraitUrl } from '../lib/game';
 import { compact } from '../lib/format';
-import { attempt } from '../store/actions';
 import { usePrefs } from '../store/prefs';
 import { useCan, useOpenTicketCount, useTabs } from '../store/selectors';
 import { useBoard } from '../store/store';
+import { AccountChip, Bell } from './team/Account';
 import { useUi } from '../store/ui';
 
 const PLACES = [
@@ -56,7 +55,7 @@ function TabButton({ id, active }: { id: string; active: boolean }) {
       {viewers.length > 0 && (
         <span className="tab-viewers" aria-label={`${viewers.map((v) => v.name).join(', ')} viewing`}>
           {viewers.slice(0, 3).map((v) => (
-            <img key={v.user_id} src={avatarUrl(v.avatar)} alt="" title={`${v.name} is here`} />
+            <img key={v.user_id} src={portraitUrl(v.avatar)} alt="" title={`${v.name} is here`} />
           ))}
         </span>
       )}
@@ -79,62 +78,6 @@ function Pearls() {
     <div className="pearls" id="pearl-counter" ref={ref} title="Team pearls: earned when a reviewer approves a PR" aria-label={`${pearls} pearls`}>
       <img src={PEARL} alt="" />
       <span>{compact(shown)}</span>
-    </div>
-  );
-}
-
-function UserMenu({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
-  const me = useBoard((s) => s.me);
-  const [open, setOpen] = useState(false);
-  const show = useUi((u) => u.show);
-  const canUsers = useCan('manage_users');
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    window.addEventListener('pointerdown', h);
-    return () => window.removeEventListener('pointerdown', h);
-  }, [open]);
-  if (!me) return null;
-  const item = (label: string, fn: () => void) => (
-    <button
-      className="menu-item"
-      role="menuitem"
-      onClick={() => {
-        setOpen(false);
-        fn();
-      }}
-    >
-      {label}
-    </button>
-  );
-  return (
-    <div style={{ position: 'relative' }} ref={ref}>
-      <button className="presence-face me-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} title={`${me.name} (${me.role})`}>
-        <img src={avatarUrl(me.avatar)} alt={me.name} />
-      </button>
-      {open && (
-        <div className="menu wood" role="menu">
-          <div className="sheet">
-            <div style={{ padding: '6px 10px' }}>
-              <b className="label">{me.name}</b>
-              <div className="hint-text">
-                {me.email} · {me.role}
-              </div>
-            </div>
-            {item('⚙ Settings', () => show({ kind: 'settings' }))}
-            {canUsers && item('✉ Invite a teammate', () => show({ kind: 'settings', section: 'team' }))}
-            {item('⌨ Keyboard shortcuts', () => show({ kind: 'shortcuts' }))}
-            {item('↩ Log out', async () => {
-              await attempt(() => api.logout());
-              connection.stop();
-              useBoard.getState().reset();
-              useBoard.getState().setMe(null);
-              await onLoggedOut();
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -203,7 +146,7 @@ export function Header({ activeTab, onLoggedOut }: { activeTab: string | null; o
           <div className="presence" aria-label={`Online: ${others.map((o) => o.name).join(', ')}`}>
             {others.slice(0, 5).map((p) => (
               <span key={p.user_id} className="presence-face" title={`${p.name} is online${p.tab_id ? ` on ${useBoard.getState().tabs[p.tab_id]?.name ?? 'a tab'}` : ''}`}>
-                <img src={avatarUrl(p.avatar)} alt={p.name} />
+                <img src={portraitUrl(p.avatar)} alt={p.name} />
               </span>
             ))}
           </div>
@@ -234,7 +177,8 @@ export function Header({ activeTab, onLoggedOut }: { activeTab: string | null; o
         <button className={`btn icon ${musicOn ? 'on' : ''}`} onClick={() => setPrefs({ music: !musicOn })} title="Music (M)" aria-pressed={musicOn} aria-label="Music">
           ♪
         </button>
-        <UserMenu onLoggedOut={onLoggedOut} />
+        <Bell />
+        <AccountChip onLoggedOut={onLoggedOut} />
       </div>
     </header>
   );

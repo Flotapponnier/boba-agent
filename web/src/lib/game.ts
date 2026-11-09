@@ -27,6 +27,12 @@ export const avatarUrl = (key: string | null | undefined) => asset(sprite(key).a
 export const bodyUrl = (key: string | null | undefined) => asset(sprite(key).body);
 export const PEARL = asset('sprites/character/pearl.webp');
 
+/** Mirrors `team::USER_AVATARS`: humans get square portraits, agents full-body sprites. */
+export const USER_AVATARS = ['boba_avatar', 'pinky_boba_avatar', 'golden_boba_avatar', 'black_boba_avatar', 'diamond_boba_avatar', 'boba_uncle', 'uncle_song'];
+/** Portrait of a human. Accepts portrait keys and legacy sprite keys. */
+export const portraitUrl = (key: string | null | undefined) =>
+  key && USER_AVATARS.includes(key) ? asset(`sprites/avatar/${key}.webp`) : avatarUrl(key);
+
 /** Mirrors the server: `Agent.xp` is XP inside the current level. */
 export const xpForNextLevel = (level: number) => 100 + 50 * (Math.max(1, level) - 1);
 export const xpPct = (xp: number, level: number) =>

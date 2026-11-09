@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { api } from '../../api/client';
 import type { Priority, Ticket } from '../../api/types';
 import { PRIORITIES, PRIORITY_LABEL, bodyUrl } from '../../lib/game';
@@ -8,14 +9,19 @@ import { toast } from '../../store/bus';
 import { isActive, sortedColumns, useAgentsList, useCan, useTicketRuns } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
-import { Markdown } from '../ui/Markdown';
 import { Drawer } from '../ui/Overlay';
 import { HistoryList } from './HistoryList';
 import { RunView, STATUS_LABEL } from './RunView';
+import type { CommentAnchor } from '../../api/types';
+import { Discussion } from '../comments/Comments';
+import { QuotableBody } from '../comments/QuotableBody';
 
-type View = 'live' | 'details' | 'history';
+type View = 'live' | 'details' | 'history' | 'discussion';
 
-function Details({ t }: { t: Ticket }) {
+function Details({ t, onQuote }: { t: Ticket; onQuote: (q: string) => void }) {
+  const quotes = useBoard(
+    useShallow((s) => Object.values(s.comments).filter((c) => c.ticket_id === t.id && !c.parent_id && !c.deleted && !c.resolved && c.anchor.on === 'ticket_body').map((c) => (c.anchor.on === 'ticket_body' ? c.anchor.quote : ''))),
+  );
   const canEdit = useCan('edit_tickets');
   const canRun = useCan('run_agents');
   const tab = useBoard((s) => s.tabs[t.tab_id]);
@@ -173,7 +179,7 @@ function Details({ t }: { t: Ticket }) {
             </div>
           )}
           <div className="section-title">TASK</div>
-          {t.body ? <Markdown text={t.body} /> : <p className="muted">No description.</p>}
+          {t.body ? <QuotableBody text={t.body} quotes={quotes} onQuote={onQuote} canComment={canEdit} /> : <p className="muted">No description.</p>}
           {canEdit && (
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn sm" onClick={() => setEditing(true)}>
@@ -242,13 +248,33 @@ function Details({ t }: { t: Ticket }) {
   );
 }
 
-export function TicketPanel({ ticketId, initialView }: { ticketId: string; initialView?: View }) {
+export function TicketPanel({ ticketId, initialView, commentId, runId }: { ticketId: string; initialView?: View; commentId?: string; runId?: string }) {
   const t = useBoard((s) => s.tickets[ticketId]);
   const close = useUi((u) => u.open);
   const runs = useTicketRuns(ticketId);
   const agents = useBoard((s) => s.agents);
-  const [view, setView] = useState<View>(initialView ?? (runs.length ? 'live' : 'details'));
-  const [selected, setSelected] = useState<string | null>(null);
+  const [view, setView] = useState<View>(initialView ?? (commentId ? 'discussion' : runs.length ? 'live' : 'details'));
+  const [selected, setSelected] = useState<string | null>(runId ?? null);
+  const [draft, setDraft] = useState<CommentAnchor | null>(null);
+  const [focusSeq, setFocusSeq] = useState<number | undefined>(undefined);
+  const comments = useBoard((s) => s.comments);
+  const threadCount = useMemo(() => Object.values(comments).filter((c) => c.ticket_id === ticketId && !c.parent_id && !c.deleted && !c.resolved).length, [comments, ticketId]);
+  const lineCounts = useMemo(() => {
+    const out: Record<string, Record<number, number>> = {};
+    for (const c of Object.values(comments)) if (c.ticket_id === ticketId && !c.deleted && c.anchor.on === 'run_log') ((out[c.anchor.run_id] ??= {})[c.anchor.seq] = (out[c.anchor.run_id]?.[c.anchor.seq] ?? 0) + 1);
+    return out;
+  }, [comments, ticketId]);
+  const comment = (a: CommentAnchor) => {
+    setDraft(a);
+    setView('discussion');
+  };
+  const jump = (a: CommentAnchor) => {
+    if (a.on === 'run_log' || a.on === 'run') {
+      setSelected(a.run_id);
+      setFocusSeq(a.on === 'run_log' ? a.seq : undefined);
+      setView('live');
+    } else setView('details');
+  };
 
   // All rounds (REST), merged into the store so they update live.
   useEffect(() => {
@@ -278,14 +304,15 @@ export function TicketPanel({ ticketId, initialView }: { ticketId: string; initi
       }
     >
       <div className="panel-tabs" role="tablist">
-        {(['live', 'details', 'history'] as View[]).map((v) => (
+        {(['live', 'discussion', 'details', 'history'] as View[]).map((v) => (
           <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)}>
-            {v === 'live' ? (activeRun ? '● LIVE' : `RUNS (${runs.length})`) : v === 'details' ? 'DETAILS' : 'HISTORY'}
+            {v === 'live' ? (activeRun ? '● LIVE' : `RUNS (${runs.length})`) : v === 'details' ? 'DETAILS' : v === 'discussion' ? `💬 TALK${threadCount ? ` (${threadCount})` : ''}` : 'HISTORY'}
           </button>
         ))}
       </div>
       <div className="sheet">
-        {view === 'details' && <Details t={t} />}
+        {view === 'details' && <Details t={t} onQuote={(q) => comment({ on: 'ticket_body', quote: q })} />}
+        {view === 'discussion' && <Discussion ticketId={t.id} draft={draft} onDraftDone={() => setDraft(null)} focusId={commentId} onJump={jump} />}
         {view === 'history' && <HistoryList query={{ ticket_id: t.id }} compact />}
         {view === 'live' &&
           (run ? (
@@ -299,7 +326,15 @@ export function TicketPanel({ ticketId, initialView }: { ticketId: string; initi
                   ))}
                 </div>
               )}
-              <RunView key={run.id} run={run} onSwitchRun={setSelected} />
+              <RunView
+                key={run.id}
+                run={run}
+                onSwitchRun={setSelected}
+                lineCounts={lineCounts[run.id]}
+                focusSeq={focusSeq}
+                onCommentLine={(seq) => comment({ on: 'run_log', run_id: run.id, seq })}
+                onCommentRun={() => comment({ on: 'run', run_id: run.id })}
+              />
             </>
           ) : (
             <div className="empty-state">
