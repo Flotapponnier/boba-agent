@@ -284,9 +284,9 @@ export function seed(): MockState {
     skills,
     skillBodies: { ...SKILL_BODIES },
     repos: [
-      { id: 'r_app', name: 'boba-labs/app', path: '/srv/repos/app', remote_url: 'git@github.com:boba-labs/app.git', default_branch: 'main', runner_id: null, sync: { ...defaultSync(), enabled: true, target_tab_id: 'tab_dev', issue_labels: ['bug', 'feature'], last_synced_at: iso(12 * 60_000) } },
-      { id: 'r_site', name: 'boba-labs/site', path: '/srv/repos/site', remote_url: 'git@github.com:boba-labs/site.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
-      { id: 'r_infra', name: 'boba-labs/infra', path: '/srv/repos/infra', remote_url: 'git@github.com:boba-labs/infra.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
+      { id: 'r_app', name: 'boba-labs/app', path: '/srv/repos/app', remote_url: 'git@github.com:boba-labs/app.git', default_branch: 'main', runner_id: null, ai_attribution: true, sync: { ...defaultSync(), enabled: true, target_tab_id: 'tab_dev', issue_labels: ['bug', 'feature'], last_synced_at: iso(12 * 60_000) } },
+      { id: 'r_site', name: 'boba-labs/site', path: '/srv/repos/site', remote_url: 'git@github.com:boba-labs/site.git', default_branch: 'main', runner_id: null, ai_attribution: true, sync: defaultSync() },
+      { id: 'r_infra', name: 'boba-labs/infra', path: '/srv/repos/infra', remote_url: 'git@github.com:boba-labs/infra.git', default_branch: 'main', runner_id: null, ai_attribution: true, sync: defaultSync() },
     ],
     runners: [
       { id: 'local', name: 'Demo runner', online: true, max_concurrent_runs: 4, active_runs: 0, last_seen_at: iso(0), scope: 'shared', owner_user_id: null, auth: 'demo', host: 'boba-hq', claude_version: null },

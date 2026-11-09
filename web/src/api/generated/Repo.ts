@@ -12,4 +12,10 @@ runner_id: string | null,
 /**
  * GitHub issue/PR sync. Default: disabled.
  */
-sync: RepoSync, };
+sync: RepoSync, 
+/**
+ * Let Claude Code add AI attribution (`Co-Authored-By: Claude …` trailers, "Generated
+ * with Claude Code" lines) to commits and PRs in this repo. Default true; some teams
+ * forbid it.
+ */
+ai_attribution: boolean, };

@@ -116,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
         path: repo.to_string_lossy().into_owned(),
         default_branch: "main".into(),
         remote_url: None,
+        ai_attribution: true,
     };
     let spec = RunSpec {
         run_id: Uuid::now_v7(),
@@ -128,6 +129,7 @@ async fn main() -> anyhow::Result<()> {
         mcp_servers: vec![],
         board_tools: None,
         skill_paths: vec![],
+        skill_names: vec![],
         resume_session_id: None,
         extra_instructions: None,
     };

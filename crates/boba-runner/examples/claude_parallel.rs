@@ -130,10 +130,11 @@ async fn main() -> anyhow::Result<()> {
         }),
         job: None,
         command: None,
-        repo: Some(RepoSpec { path: repo.to_string_lossy().into_owned(), default_branch: "main".into(), remote_url: None }),
+        repo: Some(RepoSpec { path: repo.to_string_lossy().into_owned(), default_branch: "main".into(), remote_url: None, ai_attribution: true }),
         mcp_servers: vec![],
         board_tools: None,
         skill_paths: vec![],
+        skill_names: vec![],
         resume_session_id: None,
         extra_instructions: None,
     }

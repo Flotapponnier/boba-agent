@@ -133,6 +133,15 @@ pub struct Repo {
     /// GitHub issue/PR sync. Default: disabled.
     #[serde(default)]
     pub sync: crate::automation::RepoSync,
+    /// Let Claude Code add AI attribution (`Co-Authored-By: Claude …` trailers, "Generated
+    /// with Claude Code" lines) to commits and PRs in this repo. Default true; some teams
+    /// forbid it.
+    #[serde(default = "crate::model::default_true")]
+    pub ai_attribution: bool,
+}
+
+pub(crate) fn default_true() -> bool {
+    true
 }
 
 /// A machine that executes runs. v1 ships the in-process "local" runner;

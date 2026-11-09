@@ -99,10 +99,12 @@ fn spec(e: &Env, kind: RunKind) -> RunSpec {
             path: e.repo.to_string_lossy().into_owned(),
             default_branch: "main".into(),
             remote_url: None,
+            ai_attribution: true,
         }),
         mcp_servers: vec![],
         board_tools: None,
         skill_paths: vec![],
+        skill_names: vec![],
         resume_session_id: None,
         extra_instructions: None,
     }

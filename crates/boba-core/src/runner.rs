@@ -32,8 +32,12 @@ pub struct RunSpec {
     pub mcp_servers: Vec<McpServerSpec>,
     /// Board tools MCP endpoint, when the agent has `board_tools`.
     pub board_tools: Option<BoardToolsSpec>,
-    /// Absolute paths of the skill folders to expose to Claude Code.
+    /// Absolute paths of the skill folders to expose to Claude Code (local runner).
     pub skill_paths: Vec<String>,
+    /// Names of the agent's skills. Remote runners resolve these against the skills they
+    /// discovered themselves (server paths do not exist there).
+    #[serde(default)]
+    pub skill_names: Vec<String>,
     /// Resume this Claude Code session (follow-up / changes-requested round).
     pub resume_session_id: Option<String>,
     /// Extra user message for this run (assign instructions or follow-up).
@@ -120,6 +124,9 @@ pub struct RepoSpec {
     pub path: String,
     pub default_branch: String,
     pub remote_url: Option<String>,
+    /// False = no AI attribution in commits / PR bodies (see `Repo::ai_attribution`).
+    #[serde(default = "crate::model::default_true")]
+    pub ai_attribution: bool,
 }
 
 /// Streamed by the runner while a run executes.
@@ -198,6 +205,12 @@ pub enum RunnerWire {
     },
     Skills {
         skills: Vec<Skill>,
+    },
+    /// Sent right after `Hello` on every (re)connect: runs still executing on this runner.
+    /// Updates produced while disconnected follow, in order. Runs the server knows as live
+    /// on this runner but missing here (after a grace period) are failed by the server.
+    Resume {
+        run_ids: Vec<Id>,
     },
     // server -> runner
     Start {
