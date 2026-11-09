@@ -203,7 +203,9 @@ pub struct Agent {
     pub allowed_tools: Vec<String>,
     pub max_turns: Option<u32>,
     // --- game stats (server-computed) ---
+    /// XP inside the current level: progress bar = xp / xp_for_next_level(level).
     pub xp: u32,
+    /// Starts at 1.
     pub level: u32,
     pub runs_completed: u32,
     pub prs_approved: u32,
@@ -267,6 +269,7 @@ pub enum Priority {
 pub struct Ticket {
     pub id: Id,
     /// Human-friendly number, unique per workspace: T-42.
+    #[ts(type = "number")]
     pub number: i64,
     pub tab_id: Id,
     pub column_id: Id,
@@ -284,6 +287,7 @@ pub struct Ticket {
     pub agent_id: Option<Id>,
     pub branch: Option<String>,
     pub pr_url: Option<String>,
+    #[ts(type = "number | null")]
     pub pr_number: Option<i64>,
     /// Last reviewer feedback when changes were requested.
     pub review_feedback: Option<String>,
@@ -354,7 +358,9 @@ pub struct Run {
     pub summary: Option<String>,
     pub verdict: Option<ReviewVerdict>,
     pub cost_usd: f64,
+    #[ts(type = "number")]
     pub input_tokens: u64,
+    #[ts(type = "number")]
     pub output_tokens: u64,
     pub started_by: Option<Id>,
     pub created_at: DateTime<Utc>,
@@ -389,6 +395,7 @@ pub enum LogKind {
 pub struct RunLogLine {
     pub run_id: Id,
     /// Monotonic per run, starts at 0.
+    #[ts(type = "number")]
     pub seq: u64,
     pub ts: DateTime<Utc>,
     pub kind: LogKind,

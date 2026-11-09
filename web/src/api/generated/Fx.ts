@@ -3,4 +3,4 @@
 /**
  * Purely cosmetic one-shot effects so every connected screen celebrates together.
  */
-export type Fx = { "fx": "level_up", agent_id: string, level: number, } | { "fx": "xp_gained", agent_id: string, amount: number, } | { "fx": "work_finished", agent_id: string, ticket_id: string, } | { "fx": "pr_approved", agent_id: string, ticket_id: string, reviewer_id: string, } | { "fx": "changes_requested", ticket_id: string, reviewer_id: string, } | { "fx": "run_failed", agent_id: string, ticket_id: string, };
+export type Fx = { "fx": "level_up", agent_id: string, level: number, } | { "fx": "xp_gained", agent_id: string, amount: number, } | { "fx": "work_finished", agent_id: string, ticket_id: string, } | { "fx": "pr_approved", agent_id: string, ticket_id: string, reviewer_id: string, } | { "fx": "changes_requested", ticket_id: string, reviewer_id: string, } | { "fx": "run_failed", agent_id: string, ticket_id: string, } | { "fx": "pearls_earned", ticket_id: string, amount: number, total: number, };

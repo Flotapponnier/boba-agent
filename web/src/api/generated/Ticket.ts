@@ -8,7 +8,7 @@ export type Ticket = { id: string,
 /**
  * Human-friendly number, unique per workspace: T-42.
  */
-number: bigint, tab_id: string, column_id: string, 
+number: number, tab_id: string, column_id: string, 
 /**
  * Fractional ordering inside a column.
  */
@@ -24,7 +24,7 @@ color: string | null, repo_id: string | null,
 /**
  * Agent currently (or last) working on it.
  */
-agent_id: string | null, branch: string | null, pr_url: string | null, pr_number: bigint | null, 
+agent_id: string | null, branch: string | null, pr_url: string | null, pr_number: number | null, 
 /**
  * Last reviewer feedback when changes were requested.
  */

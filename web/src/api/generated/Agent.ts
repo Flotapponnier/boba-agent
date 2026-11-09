@@ -37,4 +37,12 @@ model: string | null, permission_mode: PermissionMode,
 /**
  * Extra `--allowedTools` entries, e.g. "Bash(git diff:*)".
  */
-allowed_tools: Array<string>, max_turns: number | null, xp: number, level: number, runs_completed: number, prs_approved: number, status: AgentStatus, current_run_id: string | null, created_by: string | null, created_at: string, };
+allowed_tools: Array<string>, max_turns: number | null, 
+/**
+ * XP inside the current level: progress bar = xp / xp_for_next_level(level).
+ */
+xp: number, 
+/**
+ * Starts at 1.
+ */
+level: number, runs_completed: number, prs_approved: number, status: AgentStatus, current_run_id: string | null, created_by: string | null, created_at: string, };

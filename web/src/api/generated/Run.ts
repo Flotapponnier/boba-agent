@@ -18,4 +18,4 @@ progress: number,
 /**
  * Short human line: what the agent is doing right now.
  */
-activity: string | null, summary: string | null, verdict: ReviewVerdict | null, cost_usd: number, input_tokens: bigint, output_tokens: bigint, started_by: string | null, created_at: string, started_at: string | null, ended_at: string | null, error: string | null, };
+activity: string | null, summary: string | null, verdict: ReviewVerdict | null, cost_usd: number, input_tokens: number, output_tokens: number, started_by: string | null, created_at: string, started_at: string | null, ended_at: string | null, error: string | null, };

@@ -52,6 +52,8 @@ pub struct TicketSpec {
     pub pr_url: Option<String>,
     /// Reviewer feedback to address (changes-requested round).
     pub review_feedback: Option<String>,
+    /// Number of review rounds already done on this ticket (0 on the first work run).
+    pub review_rounds: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

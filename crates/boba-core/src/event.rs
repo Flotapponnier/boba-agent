@@ -132,6 +132,13 @@ pub enum Fx {
         agent_id: Id,
         ticket_id: Id,
     },
+    /// `total` is the new workspace pearl count.
+    PearlsEarned {
+        ticket_id: Id,
+        amount: u32,
+        #[ts(type = "number")]
+        total: u64,
+    },
 }
 
 /// Server -> client.

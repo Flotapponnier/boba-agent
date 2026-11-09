@@ -23,6 +23,21 @@ pub struct Snapshot {
     /// Latest 100 history events, newest first.
     pub history: Vec<HistoryEvent>,
     pub settings: WorkspaceSettings,
+    pub stats: WorkspaceStats,
+}
+
+/// Team-wide game counters (the pearl counter in the header). Also re-sent via `Fx::PearlsEarned`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkspaceStats {
+    /// Earned when a reviewer approves a PR (bonus on first-round approval).
+    #[ts(type = "number")]
+    pub pearls: u64,
+    #[ts(type = "number")]
+    pub runs_completed: u64,
+    #[ts(type = "number")]
+    pub prs_approved: u64,
+    pub total_cost_usd: f64,
 }
 
 /// Workspace-wide customisation.
@@ -89,6 +104,21 @@ pub struct InviteResponse {
     pub user: User,
     /// One-time link to set a password.
     pub invite_url: String,
+}
+
+/// `POST /api/auth/accept-invite`
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AcceptInvite {
+    pub token: String,
+    pub password: String,
+}
+
+/// `PATCH /api/users/:id`
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateUser {
+    pub role: Role,
 }
 
 // ---------------------------------------------------------------- agents
