@@ -30,6 +30,7 @@ const MODES: { id: PermissionMode; label: string; hint: string }[] = [
 export function AgentEditor({ agentId }: { agentId?: string }) {
   const existing = useBoard((s) => (agentId ? s.agents[agentId] : undefined));
   const skills = useBoard((s) => s.skills);
+  const connectors = useBoard((s) => s.connectors);
   const role = useBoard((s) => s.me?.role);
   const show = useUi((u) => u.show);
   const open = useUi((u) => u.open);
@@ -200,6 +201,31 @@ export function AgentEditor({ agentId }: { agentId?: string }) {
               {skillList.length === 0 && <p className="muted" style={{ padding: 8 }}>No skill found.</p>}
             </div>
           </div>
+
+          <div className="field" style={{ marginTop: 10 }}>
+            <span className="label">Portals (MCP connectors) ({f.connector_ids.length})</span>
+            <div className="chips">
+              {Object.values(connectors).map((c) => {
+                const on = f.connector_ids.includes(c.id);
+                return (
+                  <button type="button" key={c.id} className={`chip ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => set('connector_ids', on ? f.connector_ids.filter((x) => x !== c.id) : [...f.connector_ids, c.id])}>
+                    🌀 {c.name}
+                  </button>
+                );
+              })}
+              {Object.keys(connectors).length === 0 && <span className="hint-text">No portal yet. Open one on the Portals page.</span>}
+            </div>
+          </div>
+          <label className="toggle-row" style={{ marginTop: 10 }}>
+            <span className="switch">
+              <input type="checkbox" checked={f.board_tools} onChange={(e) => set('board_tools', e.target.checked)} />
+              <span />
+            </span>
+            <span>
+              Board tools
+              <small>Lets this boba list, create and comment tickets on the board (e.g. a triage quest that files tickets)</small>
+            </span>
+          </label>
 
           <div className="field-row" style={{ marginTop: 10 }}>
             <label className="field">

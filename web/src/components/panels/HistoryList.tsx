@@ -31,14 +31,27 @@ export const KIND_ICON: Partial<Record<HistoryKind, string>> = {
   tab_deleted: '🗂️',
   user_joined: '🙋',
   comment: '💬',
+  command_issued: '🎙️',
+  command_executed: '✨',
+  job_created: '📜',
+  job_updated: '📜',
+  job_deleted: '📜',
+  job_run_started: '⚔️',
+  job_run_finished: '🏆',
+  ticket_imported: '🐙',
+  repo_synced: '🔄',
+  connector_created: '🌀',
+  connector_updated: '🌀',
+  connector_deleted: '🌀',
 };
 
-export type Category = 'all' | 'tickets' | 'runs' | 'reviews' | 'agents' | 'team';
+export type Category = 'all' | 'tickets' | 'runs' | 'reviews' | 'agents' | 'automation' | 'team';
 export const CATEGORY: Record<Exclude<Category, 'all'>, HistoryKind[]> = {
   tickets: ['ticket_created', 'ticket_updated', 'ticket_moved', 'ticket_deleted', 'comment'],
   runs: ['run_started', 'run_waiting', 'run_succeeded', 'run_failed', 'run_cancelled', 'pr_opened'],
   reviews: ['review_approved', 'review_changes_requested'],
   agents: ['agent_created', 'agent_updated', 'agent_deleted', 'agent_level_up'],
+  automation: ['job_created', 'job_updated', 'job_deleted', 'job_run_started', 'job_run_finished', 'ticket_imported', 'repo_synced', 'connector_created', 'connector_updated', 'connector_deleted', 'command_issued', 'command_executed'],
   team: ['user_joined', 'skill_created', 'skill_updated', 'tab_created', 'tab_updated', 'tab_deleted'],
 };
 

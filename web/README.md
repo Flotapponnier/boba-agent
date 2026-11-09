@@ -19,6 +19,9 @@ pnpm build:demo # static demo (mock mode) in web/dist-demo, works from any sub-p
 | `src/store/` | Normalised Zustand store fed by `ServerMessage`, optimistic actions, per-viewer prefs (localStorage), UI state, Fx/toast bus |
 | `src/mock/` | Fake server with the same REST + WS semantics and simulated Claude Code runs (`VITE_MOCK=1`). `window.bobaMock` lets you reset or speed it up |
 | `src/components/` | Board, tavern, panels (ticket + live run, agent profile, history, skills), modals, FX layer |
+| `src/components/quests/` | Quest board (scheduled jobs): cards with live countdown, schedule builder with server preview, run history |
+| `src/components/integrations/` | Repo sync settings (GitHub issues/PRs) and Portals (MCP connectors, write-only secrets, test) |
+| `src/components/command/` + `src/lib/voice.ts` | ⌘K command bar, hold-Space voice (Web Speech or Whisper upload), Concierge plan cards, confirm then execute |
 | `src/audio/` | Original procedural chiptune (Web Audio) and Bobavim SFX |
 
 Demo login in mock mode: `owner@boba.local` with any password. Add `?fresh` to the URL to see the first-run setup screen.

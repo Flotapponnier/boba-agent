@@ -1,3 +1,4 @@
+import { nextRuns } from '../lib/schedule';
 import type {
   Agent,
   Column,
@@ -62,6 +63,12 @@ export const defaultSync = (): import('../api/types').RepoSync => ({
   last_synced_at: null,
   last_error: null,
 });
+
+function job(id: string, name: string, icon: string, agent_id: string, prompt: string, schedule: import('../api/types').Schedule, output: import('../api/types').JobOutput, extra: Partial<import('../api/types').Job> = {}): import('../api/types').Job {
+  const j: import('../api/types').Job = { id, name, description: '', icon, agent_id, prompt, schedule, output, enabled: true, repo_id: null, tab_id: null, skip_if_running: true, last_run_id: null, last_run_at: null, next_run_at: null, last_result: null, runs_count: 0, created_by: 'u_owner', created_at: iso(8 * D), ...extra };
+  j.next_run_at = j.enabled ? nextRuns(schedule, new Date(), 1)[0]?.toISOString() ?? null : null;
+  return j;
+}
 
 let n = 0;
 export const mkId = (p: string) => `${p}_${(++n).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -149,10 +156,10 @@ export function seed(): MockState {
   const agents: Agent[] = [
     agent('a_dev', 'Boba Dev', 'Dev', 'boba', '#f39c12', 'Ships it with tests, every time.', 'You are Boba Dev, a full-stack developer. Work in your worktree, write tests first and open a clean PR.', ['sk_ts', 'sk_react', 'sk_tests'], { xp: 60, level: 3, runs_completed: 14, prs_approved: 11 }),
     agent('a_uncle', 'Uncle Review', 'Reviewer', 'boba_uncle', '#3498db', 'No file:line, no approval.', 'You are Uncle Review. Review every PR with the pr-review skill, cite file:line, never merge yourself.', ['sk_review', 'sk_security'], { xp: 120, level: 4, runs_completed: 23, permission_mode: 'plan' }),
-    agent('a_pinky', 'Pinky SEO', 'SEO', 'pinky_boba', '#ff6fb5', 'Every page deserves a meta.', 'You are Pinky SEO. Audit pages, meta tags, sitemap and llms.txt.', ['sk_seo'], { xp: 40, level: 2, runs_completed: 5, prs_approved: 4 }),
+    agent('a_pinky', 'Pinky SEO', 'SEO', 'pinky_boba', '#ff6fb5', 'Every page deserves a meta.', 'You are Pinky SEO. Audit pages, meta tags, sitemap and llms.txt.', ['sk_seo'], { xp: 40, level: 2, runs_completed: 5, prs_approved: 4, connector_ids: ['cn_gsc'], board_tools: true }),
     agent('a_diamond', 'Diamond Architect', 'Architect', 'boba_diamond', '#1abc9c', 'Design first, measure always.', 'You are Diamond Architect. Design before coding and measure performance.', ['sk_ts', 'sk_deploy'], { xp: 10, level: 2, runs_completed: 3, prs_approved: 2, model: 'claude-opus-5-5' }),
-    agent('a_golden', 'Golden QA', 'QA', 'golden_boba', '#ffd23f', 'If it is not tested, it is broken.', 'You are Golden QA. Reproduce bugs and write end-to-end tests.', ['sk_tests'], { xp: 80, level: 1, runs_completed: 2, prs_approved: 1, model: 'claude-haiku-5-5' }),
-    agent('a_black', 'Black Ops', 'DevOps', 'black_boba', '#34495e', 'CI green or it did not happen.', 'You are Black Ops. You own CI, deployments and the runners.', ['sk_docker', 'sk_deploy'], { xp: 0, level: 1, runs_completed: 0, permission_mode: 'default' }),
+    agent('a_golden', 'Golden QA', 'QA', 'golden_boba', '#ffd23f', 'If it is not tested, it is broken.', 'You are Golden QA. Reproduce bugs and write end-to-end tests.', ['sk_tests'], { xp: 80, level: 1, runs_completed: 2, prs_approved: 1, model: 'claude-haiku-5-5', connector_ids: ['cn_sentry'], board_tools: true }),
+    agent('a_black', 'Black Ops', 'DevOps', 'black_boba', '#34495e', 'CI green or it did not happen.', 'You are Black Ops. You own CI, deployments and the runners.', ['sk_docker', 'sk_deploy'], { xp: 0, level: 1, runs_completed: 0, permission_mode: 'default', connector_ids: ['cn_web'] }),
   ];
 
   const tabs: Tab[] = [
@@ -223,6 +230,10 @@ export function seed(): MockState {
   t('tab_seo', 3, 'Canonical URLs on blog', 'Duplicate content between /blog and /news.', ['seo'], 'normal', {
     agent_id: 'a_pinky', branch: 'boba/T-10-canonical', pr_number: 1170, pr_url: 'https://github.com/boba-labs/site/pull/1170',
   });
+  t('tab_dev', 1, 'Login button misaligned on Safari', 'Reported on GitHub: the login button overflows its container on Safari 19.', ['bug', 'ui'], 'normal', {
+    repo_id: 'r_app',
+    source: { kind: 'github_issue', repo_id: 'r_app', number: 482, url: 'https://github.com/boba-labs/app/issues/482', author: 'octo-lea' },
+  });
   t('tab_infra', 0, 'Node 26 on the runners', 'Node 22 reaches end of life. Bump images and CI.', ['ci'], 'high');
   t('tab_infra', 0, 'Hardened runner image', 'One container per task, non-root, read-only rootfs.', ['docker', 'security'], 'normal');
 
@@ -269,7 +280,7 @@ export function seed(): MockState {
     skills,
     skillBodies: { ...SKILL_BODIES },
     repos: [
-      { id: 'r_app', name: 'boba-labs/app', path: '/srv/repos/app', remote_url: 'git@github.com:boba-labs/app.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
+      { id: 'r_app', name: 'boba-labs/app', path: '/srv/repos/app', remote_url: 'git@github.com:boba-labs/app.git', default_branch: 'main', runner_id: null, sync: { ...defaultSync(), enabled: true, target_tab_id: 'tab_dev', issue_labels: ['bug', 'feature'], last_synced_at: iso(12 * 60_000) } },
       { id: 'r_site', name: 'boba-labs/site', path: '/srv/repos/site', remote_url: 'git@github.com:boba-labs/site.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
       { id: 'r_infra', name: 'boba-labs/infra', path: '/srv/repos/infra', remote_url: 'git@github.com:boba-labs/infra.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
     ],
@@ -278,8 +289,16 @@ export function seed(): MockState {
     settings: { name: 'Boba HQ', theme: 'sky', music_enabled_by_default: false, demo_mode: true, speech: { type: 'browser' } },
     stats: { pearls: 128, runs_completed: 47, prs_approved: 18, total_cost_usd: 23.41 },
     invites: {},
-    jobs: [],
-    connectors: [],
+    jobs: [
+      job('job_seo', 'Weekly SEO audit', '🔎', 'a_pinky', 'Check Search Console for pages that lost clicks or have indexing issues and file one ticket per fix in the SEO tab.', { type: 'cron', expr: '0 9 * * 1', timezone: 'Europe/Paris' }, 'tickets', { tab_id: 'tab_seo', runs_count: 6, last_run_at: iso(2 * D), last_result: 'Filed 2 tickets: canonical mismatch on /trade/btc-usd; missing meta description on /blog/fees-explained.' }),
+      job('job_deps', 'Nightly dependency check', '🛡️', 'a_black', 'List outdated and vulnerable dependencies of the app and summarise what to upgrade.', { type: 'cron', expr: '30 2 * * *', timezone: 'Europe/Paris' }, 'report', { repo_id: 'r_app', runs_count: 21, last_run_at: iso(18 * H), last_result: '## Nightly dependency check\n\n- 4 outdated packages (1 security advisory, moderate)\n- Recommend upgrading `undici` this week' }),
+      job('job_crash', 'Crash triage', '🚨', 'a_golden', 'Read new unresolved Sentry issues and file a ticket for each crash with more than 50 events.', { type: 'interval', minutes: 120 }, 'tickets', { tab_id: 'tab_dev', enabled: false, runs_count: 3, last_run_at: iso(3 * D), last_result: 'Filed 1 ticket: TypeError in fees.ts:88 (312 events).' }),
+    ],
+    connectors: [
+      { id: 'cn_gsc', name: 'Search Console', kind: 'google_search_console', transport: { type: 'stdio', command: 'npx', args: ['-y', 'mcp-server-gsc'] }, secret_keys: ['GOOGLE_APPLICATION_CREDENTIALS_JSON'], allowed_tools: [], created_by: 'u_owner', created_at: iso(7 * D) },
+      { id: 'cn_sentry', name: 'Sentry', kind: 'sentry', transport: { type: 'http', url: 'https://mcp.sentry.dev/mcp', header_secrets: { Authorization: 'SENTRY_TOKEN' } }, secret_keys: ['SENTRY_TOKEN'], allowed_tools: ['list_issues', 'get_issue'], created_by: 'u_mika', created_at: iso(5 * D) },
+      { id: 'cn_web', name: 'Web search', kind: 'web_search', transport: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-brave-search'] }, secret_keys: ['BRAVE_API_KEY'], allowed_tools: [], created_by: 'u_owner', created_at: iso(4 * D) },
+    ],
     seq,
     prSeq: 1210,
     idSeq: 0,

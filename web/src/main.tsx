@@ -6,6 +6,7 @@ import './styles/base.css';
 import './styles/board.css';
 import './styles/panels.css';
 import './styles/fx.css';
+import './styles/automation.css';
 
 async function boot() {
   if (import.meta.env.VITE_MOCK === '1') {

@@ -220,6 +220,28 @@ export function FxLayer() {
           return;
         case 'blocked':
           return;
+        case 'quest_started':
+          later(() => {
+            const r = rectOf(document.querySelector(`[data-quest="${f.job_id}"]`));
+            if (r) {
+              slam(r, 'QUEST ACCEPTED', 'ok');
+              if (!calm) confetti(center(r), 40, 0.9);
+            }
+          }, 80);
+          return;
+        case 'quest_done': {
+          const j = useBoard.getState().jobs[f.job_id];
+          sfx('done', 0.7);
+          later(() => {
+            const r = rectOf(document.querySelector(`[data-quest="${f.job_id}"]`));
+            if (r) {
+              slam(r, 'QUEST COMPLETE', 'ok');
+              if (!calm) confetti(center(r), 50, 1);
+            }
+          }, 120);
+          if (j) toast(`Quest complete: "${j.name}" ⚔️ ${j.last_result ? j.last_result.replace(/[#*`]/g, '').slice(0, 80) : ''}`, 'gold', spriteOf(j.agent_id));
+          return;
+        }
       }
     };
     return fxBus.on(handle);

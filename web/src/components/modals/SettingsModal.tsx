@@ -63,6 +63,12 @@ function Me() {
           </button>
         </div>
       </label>
+      <div className="section-title">CONCIERGE</div>
+      <label className="row">
+        <input type="checkbox" checked={p.speakReplies} onChange={(e) => p.set({ speakReplies: e.target.checked })} />
+        <span>Read the Concierge's answers out loud</span>
+      </label>
+      <p className="hint-text">Open the command bar with ⌘K / Ctrl+K, or hold Space anywhere to talk.</p>
       <div className="section-title">MOTION</div>
       <div className="segmented" role="group" aria-label="Animations">
         {(['system', 'full', 'reduce'] as MotionChoice[]).map((m) => (
@@ -170,6 +176,24 @@ function Workspace() {
         <input type="checkbox" checked={ws.music_enabled_by_default} onChange={(e) => void save({ music_enabled_by_default: e.target.checked })} />
         <span>Music on by default for everyone</span>
       </label>
+      <div className="section-title">VOICE</div>
+      <div className="segmented" role="group" aria-label="Speech to text">
+        {(['browser', 'whisper', 'disabled'] as const).map((t) => (
+          <button
+            key={t}
+            aria-pressed={ws.speech.type === t}
+            onClick={() => {
+              if (t === 'whisper') {
+                const url = prompt('Whisper-compatible endpoint URL (the server calls it)', ws.speech.type === 'whisper' ? ws.speech.url : 'http://localhost:9000/v1/audio/transcriptions');
+                if (url) void save({ speech: { type: 'whisper', url } });
+              } else void save({ speech: { type: t } });
+            }}
+          >
+            {t === 'browser' ? 'Browser' : t === 'whisper' ? 'Whisper (self-hosted)' : 'Off'}
+          </button>
+        ))}
+      </div>
+      <p className="hint-text">{ws.speech.type === 'browser' ? 'Uses the Web Speech API of each browser (Chrome, Edge, Safari).' : ws.speech.type === 'whisper' ? `Audio is sent to the Boba server, which calls ${ws.speech.url}.` : 'Voice commands are disabled.'}</p>
       <div className="section-title">RUNNERS</div>
       {Object.values(runners).map((r) => (
         <div key={r.id} className="user-row" style={{ gridTemplateColumns: '1fr auto' }}>

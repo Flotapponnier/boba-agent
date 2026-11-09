@@ -19,6 +19,7 @@ export function AgentPanel({ agentId }: { agentId: string }) {
   const repos = useBoard((s) => s.repos);
   const tabs = useBoard((s) => s.tabs);
   const skills = useBoard((s) => s.skills);
+  const connectors = useBoard((s) => s.connectors);
   const ui = useUi();
   const canManage = useCan('manage_agents');
   const [showPrompt, setShowPrompt] = useState(false);
@@ -160,6 +161,12 @@ export function AgentPanel({ agentId }: { agentId: string }) {
                 ))
               : '—'}
           </dd>
+          <dt>PORTALS</dt>
+          <dd className="chips">
+            {a.connector_ids.length ? a.connector_ids.map((id) => <span key={id} className="chip">🌀 {connectors[id]?.name ?? id}</span>) : '—'}
+          </dd>
+          <dt>BOARD TOOLS</dt>
+          <dd>{a.board_tools ? 'On: can file and update tickets' : 'Off'}</dd>
           {a.allowed_tools.length > 0 && (
             <>
               <dt>TOOLS</dt>
