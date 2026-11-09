@@ -46,6 +46,8 @@ async fn main() -> anyhow::Result<()> {
             default_branch: "main".into(),
             remote_url: Some("https://github.com/acme/app".into()),
             ai_attribution: true,
+            git_token: None,
+            git_author: None,
         }),
         mcp_servers: vec![],
         board_tools: None,

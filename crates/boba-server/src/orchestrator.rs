@@ -466,6 +466,8 @@ async fn resolve_repo(
             default_branch: r.default_branch,
             remote_url: r.remote_url,
             ai_attribution: r.ai_attribution,
+            git_token: None,
+            git_author: None,
         })),
         None if simulated => Ok(None),
         None => Err(AppError::bad(format!(

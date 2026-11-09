@@ -117,6 +117,8 @@ async fn main() -> anyhow::Result<()> {
         default_branch: "main".into(),
         remote_url: None,
         ai_attribution: true,
+        git_token: None,
+        git_author: None,
     };
     let spec = RunSpec {
         run_id: Uuid::now_v7(),

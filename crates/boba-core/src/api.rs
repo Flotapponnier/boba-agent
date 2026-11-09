@@ -412,6 +412,48 @@ pub struct UpdateRepo {
     pub ai_attribution: Option<bool>,
 }
 
+// ---------------------------------------------------------------- GitHub App
+
+/// `GET /api/github/app` [View]: is the "Boba Agent" GitHub App set up, and where is it installed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GithubAppStatus {
+    pub configured: bool,
+    pub slug: Option<String>,
+    #[ts(type = "number | null")]
+    pub app_id: Option<i64>,
+    /// `https://github.com/apps/<slug>`.
+    pub html_url: Option<String>,
+    /// Install on more accounts / repos: `https://github.com/apps/<slug>/installations/new`.
+    pub install_url: Option<String>,
+    pub installations: Vec<GithubInstallation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GithubInstallation {
+    #[ts(type = "number")]
+    pub id: i64,
+    /// User or organisation login.
+    pub account: String,
+    /// `owner/name` of the repos it can access.
+    pub repos: Vec<String>,
+}
+
+/// `GET /api/github/repos` [ManageWorkspace]: repos the app can access, for the repo picker.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GithubRepo {
+    pub full_name: String,
+    pub default_branch: String,
+    pub private: bool,
+    pub html_url: String,
+    #[ts(type = "number")]
+    pub installation_id: i64,
+    /// Set when this repo is already on the board.
+    pub repo_id: Option<Id>,
+}
+
 /// `POST /api/repos/:id/sync` result.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]

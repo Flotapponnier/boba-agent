@@ -127,6 +127,39 @@ pub struct RepoSpec {
     /// False = no AI attribution in commits / PR bodies (see `Repo::ai_attribution`).
     #[serde(default = "crate::model::default_true")]
     pub ai_attribution: bool,
+    /// Short-lived GitHub App installation token for this repo (push over
+    /// `https://x-access-token:<t>@github.com/…`, `GH_TOKEN` for `gh`). Only sent to the
+    /// built-in runner and Shared remote runners. Never log or persist it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_token: Option<SecretString>,
+    /// Commit author when the repo is driven by the GitHub App
+    /// (`Boba Agent <<app id>+<slug>[bot]@users.noreply.github.com>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_author: Option<GitAuthor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitAuthor {
+    pub name: String,
+    pub email: String,
+}
+
+/// A secret that never shows up in `Debug` output (logs, panics). Serialises as a plain
+/// string: it must only travel to trusted runners.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SecretString(pub String);
+
+impl SecretString {
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretString(***)")
+    }
 }
 
 /// Streamed by the runner while a run executes.
