@@ -538,6 +538,35 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
     let skill_paths = agent_skills.iter().map(|s| s.path.clone()).collect();
     let skill_names = agent_skills.iter().map(|s| s.name.clone()).collect();
     let (extra, resume) = db.run_inputs(run.id).await?;
+    // Board tools: a per-run token for the server's MCP endpoint (read tools only for
+    // read-only runs). Remote runners reach the server by its public URL.
+    let board_tools = if agent.board_tools {
+        let default_tab = match (run.job_id, run.ticket_id) {
+            (Some(j), _) => db.job(j).await?.and_then(|j| j.tab_id),
+            (None, Some(t)) => db.ticket(t).await?.map(|t| t.tab_id),
+            _ => None,
+        };
+        let read_only = matches!(run.kind, RunKind::Review | RunKind::Command);
+        let token =
+            state
+                .board_tokens
+                .issue(crate::board_tools::grant(run, default_tab, read_only));
+        let remote = state
+            .runners
+            .by_id(run.runner_id)
+            .is_some_and(|s| s.remote.is_some());
+        let base = if remote {
+            state.cfg.public_url.clone()
+        } else {
+            format!("http://127.0.0.1:{}", state.cfg.addr.port())
+        };
+        Some(boba_core::runner::BoardToolsSpec {
+            url: format!("{base}/api/mcp"),
+            token,
+        })
+    } else {
+        None
+    };
     // Reviews and commands are read-only, whatever the agent is configured with:
     // plan mode and a server-enforced read-only tool allowlist.
     let read_only = matches!(run.kind, RunKind::Review | RunKind::Command);
@@ -564,8 +593,7 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         command: None,
         repo,
         mcp_servers,
-        // Board tools are wired in a follow-up PR.
-        board_tools: None,
+        board_tools,
         skill_paths,
         skill_names,
         resume_session_id: resume,
@@ -1244,6 +1272,7 @@ async fn cleanup_live(state: &SharedState, run_id: Id) {
     state.flush_logs().await;
     state.hub.close_run(run_id);
     state.drop_seq(run_id);
+    state.board_tokens.revoke_run(run_id);
     if let Ok(mut live) = state.live.lock() {
         live.remove(&run_id);
     }

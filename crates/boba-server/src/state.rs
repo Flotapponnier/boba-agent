@@ -25,6 +25,8 @@ pub struct AppState {
     pub db: Db,
     pub hub: Hub,
     pub runners: crate::router::Runners,
+    /// Per-run bearer tokens of the board-tools MCP endpoint.
+    pub board_tokens: crate::board_tools::Tokens,
     /// Remote runners by id (the slot table holds them too, while registered).
     pub remotes: StdMutex<HashMap<Id, Arc<crate::remote::RemoteRunner>>>,
     /// Serialises orchestration state transitions (assign, finish, review routing).
@@ -87,6 +89,7 @@ impl AppState {
             db,
             hub: Hub::new(),
             runners,
+            board_tokens: Default::default(),
             remotes: StdMutex::new(HashMap::new()),
             orch_lock: Mutex::new(()),
             live: StdMutex::new(HashSet::new()),

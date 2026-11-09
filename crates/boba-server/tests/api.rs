@@ -2577,3 +2577,259 @@ async fn repo_settings_persist_and_reach_the_runner() {
         (false, "trunk")
     );
 }
+
+// ---------------------------------------------------------------- board tools (MCP)
+
+async fn mcp(srv: &Srv, token: &str, method: &str, params: Value) -> (StatusCode, Value) {
+    let res = reqwest::Client::new()
+        .post(format!("{}/mcp", srv.base))
+        .bearer_auth(token)
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
+        .send()
+        .await
+        .unwrap();
+    let s = res.status();
+    (s, res.json().await.unwrap_or(Value::Null))
+}
+
+fn tool_text(v: &Value) -> (bool, Value) {
+    let r = &v["result"];
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    (
+        r["isError"].as_bool().unwrap_or(true),
+        serde_json::from_str(text).unwrap_or(json!(text)),
+    )
+}
+
+#[tokio::test]
+async fn board_tools_let_a_job_file_tickets_until_the_run_ends() {
+    let srv = start().await;
+    srv.runner.hang(true);
+    let owner = srv.owner().await;
+    let snap = srv.snapshot(&owner).await;
+    let seo_tab = snap.tabs.iter().find(|t| t.name == "SEO").unwrap().id;
+    let pinky = agent(&snap, "Pinky SEO").id;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/agents/{pinky}"),
+        Some(json!({"board_tools": true})),
+    )
+    .await;
+    let (_, job) = srv
+        .post(
+            &owner,
+            "/jobs",
+            json!({"name": "Triage", "agent_id": pinky, "prompt": "File tickets",
+            "schedule": {"type": "manual"}, "output": "tickets", "tab_id": seo_tab}),
+        )
+        .await;
+    let (_, run) = srv
+        .post(
+            &owner,
+            &format!("/jobs/{}/run", job["id"].as_str().unwrap()),
+            json!({}),
+        )
+        .await;
+    let run_id = run["id"].as_str().unwrap().to_string();
+    srv.until(&owner, "job running", |s| {
+        s.runs
+            .iter()
+            .any(|r| r.id.to_string() == run_id && r.status == RunStatus::Running)
+    })
+    .await;
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.run_id.to_string() == run_id)
+        .unwrap();
+    let bt = spec.board_tools.expect("board tools in the spec");
+    assert!(bt.url.ends_with("/api/mcp"));
+    let token = bt.token;
+
+    assert_eq!(
+        mcp(&srv, "wrong", "tools/list", json!({})).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (s, init) = mcp(&srv, &token, "initialize", json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "claude"}})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(init["result"]["serverInfo"]["name"], "boba-board");
+    let res = reqwest::Client::new()
+        .post(format!("{}/mcp", srv.base))
+        .bearer_auth(&token)
+        .json(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let (_, list) = mcp(&srv, &token, "tools/list", json!({})).await;
+    let names: Vec<&str> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"create_ticket") && names.contains(&"search_history"),
+        "{names:?}"
+    );
+
+    // File a ticket: lands in the job's tab, Todo, source = job, attributed to the agent.
+    let (_, r) = mcp(&srv, &token, "tools/call", json!({"name": "create_ticket", "arguments":
+        {"title": "Fix title on /pricing", "body": "Too long", "tags": ["seo", "SEO"], "priority": "high"}})).await;
+    let (err, created) = tool_text(&r);
+    assert!(!err, "{created}");
+    let tid: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let snap = srv.snapshot(&owner).await;
+    let t = ticket(&snap, tid);
+    assert_eq!(
+        (t.tab_id, column_kind(&snap, t), t.tags.clone(), t.priority),
+        (
+            seo_tab,
+            ColumnKind::Todo,
+            vec!["seo".to_string()],
+            Priority::High
+        )
+    );
+    assert!(matches!(
+        t.source,
+        boba_core::automation::TicketSource::Job { .. }
+    ));
+    let created_ev = snap
+        .history
+        .iter()
+        .find(|e| e.ticket_id == Some(tid))
+        .unwrap();
+    assert_eq!(
+        (created_ev.actor_kind, created_ev.actor_id),
+        (boba_core::event::ActorKind::Agent, Some(pinky))
+    );
+
+    // Read, search, comment, update; bad input is a tool error, not a crash.
+    let (_, r) = mcp(
+        &srv,
+        &token,
+        "tools/call",
+        json!({"name": "list_tickets", "arguments": {"text": "/pricing"}}),
+    )
+    .await;
+    assert_eq!(tool_text(&r).1.as_array().unwrap().len(), 1);
+    let (_, r) = mcp(&srv, &token, "tools/call", json!({"name": "comment_ticket", "arguments": {"ticket_id": tid, "body": "Found by the weekly audit"}})).await;
+    assert!(!tool_text(&r).0);
+    let (_, r) = mcp(
+        &srv,
+        &token,
+        "tools/call",
+        json!({"name": "update_ticket", "arguments": {"ticket_id": tid, "priority": "urgent"}}),
+    )
+    .await;
+    assert!(!tool_text(&r).0);
+    let (_, r) = mcp(
+        &srv,
+        &token,
+        "tools/call",
+        json!({"name": "get_ticket", "arguments": {"ticket_id": tid}}),
+    )
+    .await;
+    let (_, got) = tool_text(&r);
+    assert_eq!(
+        (
+            got["priority"].clone(),
+            got["comments"].as_array().unwrap().len()
+        ),
+        (json!("urgent"), 1)
+    );
+    let (_, r) = mcp(
+        &srv,
+        &token,
+        "tools/call",
+        json!({"name": "create_ticket", "arguments": {}}),
+    )
+    .await;
+    assert!(tool_text(&r).0, "missing title must be an error");
+    let (_, r) = mcp(
+        &srv,
+        &token,
+        "tools/call",
+        json!({"name": "delete_everything", "arguments": {}}),
+    )
+    .await;
+    assert!(tool_text(&r).0);
+
+    // The token dies with the run.
+    srv.post(&owner, &format!("/runs/{run_id}/cancel"), json!({}))
+        .await;
+    srv.until(&owner, "cancelled", all_idle).await;
+    assert_eq!(
+        mcp(&srv, &token, "tools/list", json!({})).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn read_only_runs_only_get_read_tools() {
+    let srv = start().await;
+    srv.runner.silent(true); // the review stays live (and its token valid)
+    let owner = srv.owner().await;
+    let snap = srv.snapshot(&owner).await;
+    let uncle = agent(&snap, "Uncle Review").id;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/agents/{uncle}"),
+        Some(json!({"board_tools": true})),
+    )
+    .await;
+    // A ticket sitting in a review column: assigning the reviewer starts a review run.
+    let tab = &snap.tabs[0];
+    let review_col = tab
+        .columns
+        .iter()
+        .find(|c| c.kind == ColumnKind::Review)
+        .unwrap()
+        .id;
+    let t = snap.tickets.iter().find(|t| t.tab_id == tab.id).unwrap().id;
+    srv.post(
+        &owner,
+        &format!("/tickets/{t}/move"),
+        json!({"column_id": review_col, "position": 1.0}),
+    )
+    .await;
+    srv.until(&owner, "review started", |s| {
+        s.runs
+            .iter()
+            .any(|r| r.kind == RunKind::Review && !r.status.is_terminal())
+    })
+    .await;
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.kind == RunKind::Review)
+        .unwrap();
+    let token = spec.board_tools.unwrap().token;
+    let (_, list) = mcp(&srv, &token, "tools/list", json!({})).await;
+    let names: Vec<&str> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        !names.contains(&"create_ticket") && names.contains(&"get_ticket"),
+        "{names:?}"
+    );
+    let (_, r) = mcp(
+        &srv,
+        &token,
+        "tools/call",
+        json!({"name": "create_ticket", "arguments": {"title": "x"}}),
+    )
+    .await;
+    let (err, msg) = tool_text(&r);
+    assert!(
+        err && msg.as_str().unwrap_or("").contains("read-only"),
+        "{r}"
+    );
+}

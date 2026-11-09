@@ -62,6 +62,7 @@ pub fn api() -> Router<SharedState> {
             patch(board::update_repo).delete(board::delete_repo),
         )
         .route("/health", get(|| async { "ok" }))
+        .route("/mcp", post(crate::board_tools::endpoint))
         // quests
         .route("/jobs", post(crate::jobs::create))
         .route("/jobs/preview-schedule", post(crate::jobs::preview))
