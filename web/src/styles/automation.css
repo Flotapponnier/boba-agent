@@ -666,3 +666,53 @@
   cursor: not-allowed;
   transform: none;
 }
+
+/* ---------------- GitHub App ---------------- */
+.gh-card {
+  margin-bottom: 14px;
+  border-left: 8px solid #6e5494;
+}
+.gh-card.on {
+  border-left-color: #2e8b57;
+}
+.gh-card h3 {
+  font-family: var(--pixel);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.gh-octo {
+  font-size: 34px;
+}
+.gh-setup {
+  margin-top: 10px;
+}
+.gh-install {
+  padding: 6px 0;
+  border-top: 1px dashed #e0d0ae;
+}
+.gh-repos {
+  display: grid;
+  gap: 4px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.gh-repo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 2px solid #e0d0ae;
+  border-radius: 4px;
+  background: var(--paper);
+}
+.gh-repo.on {
+  background: #eef9ef;
+  border-color: #9ad3a6;
+}
+.cloning {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  color: var(--ink-soft);
+}

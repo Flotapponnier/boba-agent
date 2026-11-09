@@ -95,3 +95,6 @@ export type { ReactRequest } from './generated/ReactRequest';
 export type { MarkRead } from './generated/MarkRead';
 export type { CreateRunner } from './generated/CreateRunner';
 export type { RunnerToken } from './generated/RunnerToken';
+export type { GithubAppStatus } from './generated/GithubAppStatus';
+export type { GithubInstallation } from './generated/GithubInstallation';
+export type { GithubRepo } from './generated/GithubRepo';

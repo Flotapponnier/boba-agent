@@ -173,6 +173,19 @@ class MockServer implements Transport {
     this.botsOn = on;
     this.presence();
   }
+  /** Demo: GitHub App manifest flow + installation, without GitHub. */
+  githubSetup(org: string) {
+    this.s.github = {
+      configured: true,
+      slug: 'boba-agent-demo',
+      app_id: 424242,
+      html_url: 'https://github.com/apps/boba-agent-demo',
+      install_url: 'https://github.com/apps/boba-agent-demo/installations/new',
+      installations: [{ id: 1001, account: org, repos: [`${org}/app`, `${org}/site`, `${org}/infra`, `${org}/mobile`, `${org}/docs`] }],
+    };
+    this.save();
+  }
+
   /** Demo helper: preview the UI as another role. */
   setMyRole(role: User['role']) {
     const me = this.me();
@@ -343,6 +356,8 @@ class MockServer implements Transport {
   // ---------------------------------------------------------------- REST
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     await wait(60 + Math.random() * 120);
+    // Cloning a GitHub repo takes a moment on a real server.
+    if (method === 'POST' && path === '/api/repos' && body && (body as { path?: string }).path === '') await wait(1800);
     const url = new URL(path, 'http://mock');
     const res = this.route(method, url.pathname, url.searchParams, (body ?? {}) as Record<string, unknown>);
     return structuredClone(res) as T;
@@ -1601,6 +1616,25 @@ class MockServer implements Transport {
     let x: RegExpMatchArray | null;
     const key = `${method} ${path}`;
 
+    if (key === 'GET /api/github/app') {
+      this.need('view');
+      return this.s.github ?? { configured: false, slug: null, app_id: null, html_url: null, install_url: null, installations: [] };
+    }
+    if (key === 'GET /api/github/repos') {
+      this.need('manage_workspace');
+      const gh = this.s.github;
+      if (!gh?.configured) throw new ApiFailure(400, 'Connect GitHub first.', 'bad_request');
+      return gh.installations.flatMap((i) =>
+        i.repos.map((full) => ({
+          full_name: full,
+          default_branch: 'main',
+          private: !/site|docs/.test(full),
+          html_url: `https://github.com/${full}`,
+          installation_id: i.id,
+          repo_id: this.s.repos.find((r) => r.name === full || r.remote_url?.includes(full))?.id ?? null,
+        })),
+      );
+    }
     if (key === 'PATCH /api/me') {
       const me = this.me();
       if (!me) throw new ApiFailure(401, 'Please log in first.', 'unauthorized');
