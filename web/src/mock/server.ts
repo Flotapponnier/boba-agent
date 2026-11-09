@@ -1147,6 +1147,7 @@ class MockServer implements Transport {
       if (u.path != null) r.path = u.path;
       if (u.remote_url !== undefined) r.remote_url = u.remote_url;
       if (u.default_branch != null) r.default_branch = u.default_branch;
+      if (u.ai_attribution != null) r.ai_attribution = u.ai_attribution;
       if (u.sync) r.sync = { ...u.sync, last_synced_at: r.sync.last_synced_at, last_error: r.sync.last_error };
       this.upsert({ entity: 'repo', data: r });
       return r;

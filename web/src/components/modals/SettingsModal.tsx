@@ -303,7 +303,7 @@ function Team() {
 function Repos() {
   const repos = useBoard((s) => s.repos);
   const runners = useBoard((s) => s.runners);
-  const [f, setF] = useState({ name: '', path: '', remote_url: '', default_branch: 'main', runner_id: '' });
+  const [f, setF] = useState({ name: '', path: '', remote_url: '', default_branch: 'main', runner_id: '', ai_attribution: true });
   return (
     <div>
       {Object.values(repos).map((r) => (
@@ -334,11 +334,11 @@ function Repos() {
         onSubmit={async (e) => {
           e.preventDefault();
           const r = await attempt(() =>
-            api.createRepo({ sync: null, name: f.name.trim(), path: f.path.trim(), remote_url: f.remote_url.trim() || null, default_branch: f.default_branch.trim() || null, runner_id: f.runner_id || null }),
+            api.createRepo({ sync: null, ai_attribution: f.ai_attribution, name: f.name.trim(), path: f.path.trim(), remote_url: f.remote_url.trim() || null, default_branch: f.default_branch.trim() || null, runner_id: f.runner_id || null }),
           );
           if (r) {
             useBoard.getState().upsert({ entity: 'repo', data: r });
-            setF({ name: '', path: '', remote_url: '', default_branch: 'main', runner_id: '' });
+            setF({ name: '', path: '', remote_url: '', default_branch: 'main', runner_id: '', ai_attribution: true });
             toast(`${r.name} added`, 'good');
           }
         }}
@@ -374,6 +374,10 @@ function Repos() {
             </select>
           </label>
         </div>
+        <label className="row" style={{ marginTop: 10 }}>
+          <input type="checkbox" checked={f.ai_attribution} onChange={(e) => setF({ ...f, ai_attribution: e.target.checked })} />
+          <span>Allow AI attribution in commits (Co-Authored-By: Claude)</span>
+        </label>
         <div className="row end" style={{ marginTop: 10 }}>
           <button className="btn gold sm">+ Add repo</button>
         </div>
