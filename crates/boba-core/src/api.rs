@@ -580,6 +580,10 @@ pub struct CommandRequest {
     pub agent_id: Option<Id>,
     /// True when the text came from voice (the concierge tolerates transcription errors).
     pub voice: bool,
+    /// Speaker's IANA timezone (browser `Intl…timeZone`) so "at 9" means 9 for them.
+    #[serde(default)]
+    #[ts(optional)]
+    pub timezone: Option<String>,
 }
 
 /// One proposed action. Executed only after the user confirms, with the user's own permissions.
