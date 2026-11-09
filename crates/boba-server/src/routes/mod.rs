@@ -65,6 +65,10 @@ pub fn api() -> Router<SharedState> {
         .route("/mcp", post(crate::board_tools::endpoint))
         .route("/repos/{id}/sync", post(crate::sync::sync_now))
         .route("/github/webhook", post(crate::sync::webhook))
+        .route("/github/app", get(crate::github_app::status))
+        .route("/github/app/setup", get(crate::github_app::setup))
+        .route("/github/app/callback", get(crate::github_app::callback))
+        .route("/github/repos", get(crate::github_app::repos))
         .route("/command", post(crate::concierge::command))
         .route("/command/execute", post(crate::concierge::execute))
         // quests

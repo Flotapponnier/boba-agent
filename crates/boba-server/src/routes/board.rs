@@ -337,8 +337,21 @@ pub async fn create_repo(
     if name.is_empty() {
         return Err(AppError::bad("repository name is required"));
     }
-    let path = req.path.trim().to_string();
+    let mut path = req.path.trim().to_string();
     let local = req.runner_id.is_none_or(|id| state.runners.contains(id));
+    // "Add repo from GitHub": no path, a GitHub remote -> clone it with the App's token.
+    if path.is_empty() && local {
+        let full = req
+            .remote_url
+            .as_deref()
+            .and_then(boba_github::RepoRef::parse)
+            .ok_or_else(|| AppError::bad("give a local path, or a GitHub remote URL to clone"))?
+            .full_name();
+        path = crate::github_app::clone_repo(&state, &full)
+            .await?
+            .to_string_lossy()
+            .to_string();
+    }
     if local && !state.cfg.demo_mode {
         let p = std::path::Path::new(&path);
         if !p.is_absolute() {

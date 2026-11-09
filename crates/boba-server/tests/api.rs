@@ -3274,3 +3274,270 @@ async fn github_sync_imports_reviews_and_reports_back() {
     let good = boba_github::webhook::sign(b"hook-secret", body);
     assert_eq!(post(good).await.unwrap().status(), StatusCode::OK);
 }
+
+// ---------------------------------------------------------------- GitHub App
+
+/// Throwaway RSA key for the test app (never used anywhere else).
+const TEST_APP_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDnr00Gy+mIf6Zk\nYBLBrs91EZHdqBhIGzDTFhMlvcWWDoR9ziAupOi4Y7+3YxPwpetqxQAxjXomlyyR\n8VLTOX53itsTwyaX1IRW3pUkHa8zi0OSMBJJiCjrhhszlHoNGwOEBfTpvzs4ujMp\nmSdnUkyV2M5+QWa+8b6rMNft8PohHFYoYb+5vIlzUsf/IVZTi8B+liYogNMe5juS\nWoYQ8QsiNBTLjsF8SDy1vnCrPE8sqsOB/Znz6Rd1l1UXpzZ87I8S/sJ7NyUCHrAX\nbqnS7UAS/KE6t63GEcFvvWtiP+uDJU7pwQIYOPkLpihllhTaO5meE+OdocKyfPb+\nUICxLSyvAgMBAAECggEAQYFJbHYD4dGBmJinRPapdkaQ8NRBhUWW0N/Jax7UOiCB\nqlY4uCdtGxEs1+td7Gjk/kuTye7fzgBpHBxYmBsF3EO4vEYtZ7kw76TAEzWHXzHt\nWWxZB0xFkY3ZrAQ7W/A61r2eaOZmFpxiscy5HNfiim2BuKXCKJOOHrXRH1fGSMzB\n//F2nQ8kXgeHUXKsxWUO6ZfsTKSMNSoFnjhokWS2k1C+Imana2HFu4ISVvEnJkPM\nDBbvbXARqsKd31S4VDyMsEdk8A1bMaROyA9OkCLNYTD/PvD8ZSfekUS7buc1ChO1\nT5fPYwYxE4eqPiJ1FQ8mLv1E/n+TJNOOQkrJIG/7bQKBgQD2WtXrohs+TpXpdsmW\niXeDlCHSGwzNasyeaSvDAgqlX3By3tIiF9ergmnK84AQPBJh6UkfZu43cc0/dDMX\nzcu/EgbWFTbtM7soXu5I9KuZ9AQgscUVnBZ6TqeEHQE7OPP5Le5oOc409gss6b1N\n7aR0UCVfXyHm+okY6+jr97HkpQKBgQDwwW4k+gTtX42X+4SyJTJYYu/7NYcv1rut\nJHURDRmc9iJFgH4tewMYl2+QCJs0P13myhN2T537p9rnR7/5LL5AZ5dTxOB5B9lE\n/8TjqAR3I/Iz9GysUb1jCQcxlXbkYqLoxy86uoI5S22u97r5Lc/Hv69POqvoc4Gf\nlckRAGWHwwKBgQC7sQsoonIVL3Rh0iHWMle/BL4bwIYpfwP0cPZpdYW85xDaQ89f\nMEEdp5eIi6p3M/1hYYZXiWlXDrosbRB8Q0vHACn7M2CMqgwevuzW4qpW+iWm7ynT\nw/8QIhrYuex1PXgL0aXA/MGRch+jkVWsKLFR+Lnwhp9ixmBrf1kPZsC/DQKBgQC+\neaq04oHHc5PIrJudfcRJHW2UKBNei9tL7s4XwW+EOU+AAVrSjMI0UItZPxXbzk5y\na2nebrslAPY1iRSfBQE4Xzzgb6DQ4J7K8jhJjQKLaAsVg8n+w2S818WzOvcnVcph\ntETvh+PDhKOwjBqHTfFXrZX7bwXXEJt7MLw1EUVClQKBgGNyJKcai1T5bwfPclnO\nLj7XyIp02BBuShBBpTF0CdJm+WKd7dlxWAec5SdFYJTU4AfS2xX11WkCEbo+tOQY\nbwdoo0JYzXWl2wbImUfT+w/FRwbFSatNtoNwtch1cO4GSGL99ZDa02vQsZXTGdRk\nQ2Mt1qPHsJpGE+JMT5G934Rn\n-----END PRIVATE KEY-----";
+
+#[derive(Default)]
+struct MockApp {
+    token_mints: u32,
+    jwt_seen: Option<String>,
+}
+
+async fn mock_github_app(m: Arc<Mutex<MockApp>>) -> String {
+    use axum::extract::{Path as P, State as S};
+    use axum::http::HeaderMap;
+    use axum::routing::{get, post};
+    type St = Arc<Mutex<MockApp>>;
+    let app = axum::Router::new()
+        .route("/app-manifests/{code}/conversions", post(|P(code): P<String>| async move {
+            assert_eq!(code, "the-code");
+            axum::Json(json!({"id": 42, "slug": "boba-agent-x", "name": "Boba Agent", "client_id": "Iv1.abc",
+                "client_secret": "csecret", "webhook_secret": "whsec", "pem": TEST_APP_PEM,
+                "html_url": "https://github.com/apps/boba-agent-x", "owner": {"login": "Flotapponnier"}}))
+        }))
+        .route("/app/installations", get(|S(m): S<St>, h: HeaderMap| async move {
+            let auth = h["authorization"].to_str().unwrap().trim_start_matches("Bearer ").to_string();
+            m.lock().unwrap().jwt_seen = Some(auth);
+            axum::Json(json!([{"id": 7, "account": {"login": "Flotapponnier"}}]))
+        }))
+        .route("/app/installations/{id}/access_tokens", post(|S(m): S<St>, P(id): P<i64>| async move {
+            assert_eq!(id, 7);
+            m.lock().unwrap().token_mints += 1;
+            axum::Json(json!({"token": "ghs_installation_token", "expires_at": (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339()}))
+        }))
+        .route("/installation/repositories", get(|h: HeaderMap| async move {
+            assert_eq!(h["authorization"], "Bearer ghs_installation_token");
+            axum::Json(json!({"total_count": 1, "repositories": [{"full_name": "Flotapponnier/boba-agent",
+                "default_branch": "main", "private": false, "html_url": "https://github.com/Flotapponnier/boba-agent"}]}))
+        }))
+        .with_state(m);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn github_app_manifest_flow_tokens_and_git_credentials() {
+    let mock = Arc::new(Mutex::new(MockApp::default()));
+    let gh = mock_github_app(mock.clone()).await;
+    let runner = FakeRunner::new();
+    let r: Arc<dyn Runner> = Arc::new(runner.clone());
+    let mut cfg = Config::for_tests(tmp_dir());
+    cfg.github_api = gh.clone();
+    cfg.github_web = gh.clone();
+    cfg.public_url = "https://boba.example".into();
+    let srv = start_cfg(cfg, Runners::from(r), runner).await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+
+    let (_, st) = srv.get(&owner, "/github/app").await;
+    assert_eq!(st["configured"], false);
+
+    // 1. The setup page posts a manifest to GitHub.
+    assert_eq!(
+        srv.get(&member, "/github/app/setup").await.0,
+        StatusCode::FORBIDDEN
+    );
+    let page = owner
+        .get(format!("{}/github/app/setup", srv.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        page.contains(&format!("{gh}/settings/apps/new?state=")),
+        "{page}"
+    );
+    assert!(page.contains("https://boba.example/api/github/webhook"));
+    assert!(page.contains("&quot;pull_requests&quot;:&quot;write&quot;"));
+    let state = page
+        .split("state=")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+
+    // 2. GitHub sends the browser back: bad state refused, good one stored + redirect to install.
+    let nofollow = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let bad = nofollow
+        .get(format!(
+            "{}/github/app/callback?code=the-code&state=nope",
+            srv.base
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    let ok = nofollow
+        .get(format!(
+            "{}/github/app/callback?code=the-code&state={state}",
+            srv.base
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(ok.status().is_redirection(), "{}", ok.status());
+    assert_eq!(
+        ok.headers()["location"],
+        format!("{gh}/apps/boba-agent-x/installations/new").as_str()
+    );
+    // A state works once.
+    let again = nofollow
+        .get(format!(
+            "{}/github/app/callback?code=the-code&state={state}",
+            srv.base
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(again.status(), StatusCode::BAD_REQUEST);
+    // Secrets are stored encrypted.
+    let raw = srv.state.db.setting("github_app").await.unwrap().unwrap();
+    assert!(
+        !raw.contains("BEGIN") && !raw.contains("whsec") && !raw.contains("csecret"),
+        "{raw}"
+    );
+
+    // 3. Status lists the installation (JWT RS256 -> installation token -> repos).
+    let (_, st) = srv.get(&member, "/github/app").await;
+    assert_eq!(
+        (
+            st["configured"].clone(),
+            st["slug"].clone(),
+            st["app_id"].clone()
+        ),
+        (json!(true), json!("boba-agent-x"), json!(42))
+    );
+    assert_eq!(
+        st["installations"][0]["repos"],
+        json!(["Flotapponnier/boba-agent"])
+    );
+    let jwt = mock.lock().unwrap().jwt_seen.clone().unwrap();
+    let header: Value = serde_json::from_slice(
+        &jwt.split('.')
+            .next()
+            .map(|h| {
+                use std::io::Read;
+                let mut b = Vec::new();
+                let padded = format!("{h}{}", "=".repeat((4 - h.len() % 4) % 4))
+                    .replace('-', "+")
+                    .replace('_', "/");
+                let _ = base64_decode(&padded).as_slice().read_to_end(&mut b);
+                b
+            })
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(header["alg"], "RS256");
+
+    // 4. Repo picker; once added, it is marked.
+    assert_eq!(
+        srv.get(&member, "/github/repos").await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (_, list) = srv.get(&owner, "/github/repos").await;
+    assert_eq!(
+        (list[0]["full_name"].clone(), list[0]["repo_id"].clone()),
+        (json!("Flotapponnier/boba-agent"), Value::Null)
+    );
+    let (_, repo) = srv
+        .post(&owner, "/repos", json!({"name": "boba-agent", "path": "/srv/boba-agent", "remote_url": "https://github.com/Flotapponnier/boba-agent"}))
+        .await;
+    let (_, list) = srv.get(&owner, "/github/repos").await;
+    assert_eq!(list[0]["repo_id"], repo["id"]);
+
+    // 5. Runs on that repo get a short-lived push token + the bot author; never in Debug output.
+    let snap = srv.snapshot(&owner).await;
+    srv.req(
+        &owner,
+        "PATCH",
+        &format!("/tabs/{}", snap.tabs[0].id),
+        Some(json!({"repo_id": repo["id"]})),
+    )
+    .await;
+    let t = snap
+        .tickets
+        .iter()
+        .find(|t| t.tab_id == snap.tabs[0].id)
+        .unwrap()
+        .id;
+    srv.post(
+        &owner,
+        &format!("/tickets/{t}/assign"),
+        json!({"agent_id": agent(&snap, "Boba Dev").id}),
+    )
+    .await;
+    srv.until(&owner, "ran", |s| {
+        s.runs.iter().any(|r| r.ticket_id == Some(t))
+    })
+    .await;
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.ticket.as_ref().is_some_and(|x| x.id == t))
+        .unwrap();
+    let repo_spec = spec.repo.clone().unwrap();
+    assert_eq!(
+        repo_spec.git_token.as_ref().map(|t| t.expose()),
+        Some("ghs_installation_token")
+    );
+    assert_eq!(
+        repo_spec.git_author.unwrap().email,
+        "42+boba-agent-x[bot]@users.noreply.github.com"
+    );
+    assert!(
+        !format!("{spec:?}").contains("ghs_installation_token"),
+        "token leaked into Debug"
+    );
+    assert_eq!(
+        mock.lock().unwrap().token_mints,
+        1,
+        "installation tokens are cached"
+    );
+
+    // 6. Webhooks are checked with the app's secret.
+    let body = br#"{"action": "created", "installation": {"id": 7}}"#;
+    let res = reqwest::Client::new()
+        .post(format!("{}/github/webhook", srv.base))
+        .header("x-github-event", "installation")
+        .header(
+            "x-hub-signature-256",
+            boba_github::webhook::sign(b"whsec", body),
+        )
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+fn base64_decode(s: &str) -> Vec<u8> {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let mut buf = 0u32;
+    let mut bits = 0;
+    for c in s.bytes().filter(|c| *c != b'=') {
+        let Some(v) = T.iter().position(|t| *t == c) else {
+            continue;
+        };
+        buf = buf << 6 | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    out
+}

@@ -40,6 +40,8 @@ hex = "0.4"
 rust-embed = { version = "8", features = ["mime-guess"] }
 mime_guess = "2"
 futures = "0.3"
+jsonwebtoken = "9"
+urlencoding = "2"
 croner = "4"
 chrono-tz = "0.10"
 time = "0.3"
@@ -48,5 +50,5 @@ base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "cookies"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
 tokio-tungstenite = "0.26"

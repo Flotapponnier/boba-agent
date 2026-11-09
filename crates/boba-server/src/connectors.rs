@@ -122,7 +122,7 @@ fn write_private(path: &Path, data: &[u8]) -> anyhow::Result<()> {
     }
 }
 
-fn encrypt(plain: &str) -> anyhow::Result<String> {
+pub fn encrypt(plain: &str) -> anyhow::Result<String> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key()?));
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
     let ct = cipher
@@ -133,7 +133,7 @@ fn encrypt(plain: &str) -> anyhow::Result<String> {
     Ok(B64.encode(out))
 }
 
-fn decrypt(stored: &str) -> anyhow::Result<String> {
+pub fn decrypt(stored: &str) -> anyhow::Result<String> {
     let raw = B64.decode(stored)?;
     if raw.len() < 12 {
         bail!("corrupt secret");

@@ -28,22 +28,20 @@ const POLL_EVERY: Duration = Duration::from_secs(60);
 
 // ---------------------------------------------------------------- client
 
-/// The GitHub client: `BOBA_GITHUB_API` (GitHub Enterprise) + `GH_TOKEN` / `GITHUB_TOKEN` /
-/// `gh auth token`. Cached once it works; tests install their own.
-pub async fn github(state: &SharedState) -> Result<GitHub, String> {
+/// A GitHub client able to act on `repo`: the GitHub App's installation token when the app
+/// is installed there, else `GH_TOKEN` / `GITHUB_TOKEN` / `gh auth token`. Tests install
+/// their own client in `state.github`.
+pub async fn github(state: &SharedState, repo: &RepoRef) -> Result<GitHub, String> {
     if let Some(g) = state.github.lock().await.clone() {
         return Ok(g);
     }
-    let token = boba_github::token_from_env()
-        .await
-        .ok_or_else(|| boba_github::Error::NoToken.to_string())?;
-    let g = match std::env::var("BOBA_GITHUB_API") {
-        Ok(api) if !api.trim().is_empty() => GitHub::with_api(&token, &api),
-        _ => GitHub::new(&token),
-    }
-    .map_err(|e| e.to_string())?;
-    *state.github.lock().await = Some(g.clone());
-    Ok(g)
+    let token = match crate::github_app::token_for_repo(state, &repo.full_name()).await {
+        Some(t) => t,
+        None => boba_github::token_from_env().await.ok_or_else(|| {
+            format!("connect the GitHub App to {repo} (Settings → Integrations) or set GH_TOKEN")
+        })?,
+    };
+    GitHub::with_api(&token, &state.cfg.github_api).map_err(|e| e.to_string())
 }
 
 fn repo_ref(repo: &Repo) -> Result<RepoRef, String> {
@@ -216,7 +214,7 @@ async fn fetch_and_apply(
     tab_id: Id,
     gh_ref: &RepoRef,
 ) -> Result<SyncReport, String> {
-    let gh = github(state).await?;
+    let gh = github(state, gh_ref).await?;
     let issues: Vec<Issue> = if repo.sync.import_issues {
         gh.list_open_issues(gh_ref, &repo.sync.issue_labels)
             .await
@@ -479,7 +477,7 @@ pub async fn webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let Some(secret) = state.cfg.github_webhook_secret.clone() else {
+    let Some(secret) = crate::github_app::webhook_secret(&state).await else {
         return StatusCode::NOT_FOUND;
     };
     let sig = headers
@@ -493,6 +491,10 @@ pub async fn webhook(
         .get("x-github-event")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
+    if event == "installation" || event == "installation_repositories" {
+        crate::github_app::on_installation_event(&state);
+        return StatusCode::OK;
+    }
     let repo = match boba_github::parse_event(event, &body) {
         Ok(WebhookEvent::Ping { .. }) => return StatusCode::OK,
         Ok(WebhookEvent::Issue { repo, .. }) | Ok(WebhookEvent::PullRequest { repo, .. }) => repo,
@@ -553,7 +555,9 @@ pub fn after_run(state: &SharedState, run: Run) {
         if run.status != RunStatus::Succeeded {
             return;
         }
-        let Ok(gh) = github(&state).await else { return };
+        let Ok(gh) = github(&state, &gh_ref).await else {
+            return;
+        };
         let agent = state
             .db
             .agent(run.agent_id)
@@ -634,7 +638,9 @@ pub fn ticket_done(state: &SharedState, ticket: Ticket) {
         if is_pr || !repo.sync.close_issues_on_done {
             return;
         }
-        let Ok(gh) = github(&state).await else { return };
+        let Ok(gh) = github(&state, &gh_ref).await else {
+            return;
+        };
         if let Err(e) = gh
             .close_issue(&gh_ref, number, CloseReason::Completed)
             .await
