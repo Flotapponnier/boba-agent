@@ -9,6 +9,7 @@ import type { Tab } from "./Tab";
 import type { Ticket } from "./Ticket";
 import type { User } from "./User";
 import type { WorkspaceSettings } from "./WorkspaceSettings";
+import type { WorkspaceStats } from "./WorkspaceStats";
 
 /**
  * Full board state, returned by `GET /api/snapshot` and as the first WS message.
@@ -21,4 +22,4 @@ runs: Array<Run>, skills: Array<Skill>, repos: Array<Repo>, users: Array<User>, 
 /**
  * Latest 100 history events, newest first.
  */
-history: Array<HistoryEvent>, settings: WorkspaceSettings, };
+history: Array<HistoryEvent>, settings: WorkspaceSettings, stats: WorkspaceStats, };

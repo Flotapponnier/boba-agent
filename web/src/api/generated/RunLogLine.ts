@@ -8,7 +8,7 @@ export type RunLogLine = { run_id: string,
 /**
  * Monotonic per run, starts at 0.
  */
-seq: bigint, ts: string, kind: LogKind, 
+seq: number, ts: string, kind: LogKind, 
 /**
  * Plain text rendering (always present, used for terminals and search).
  */
