@@ -45,7 +45,6 @@ pub fn api() -> Router<SharedState> {
         )
         .route("/tickets/{id}/move", post(work::move_ticket))
         .route("/tickets/{id}/assign", post(work::assign))
-        .route("/tickets/{id}/comment", post(work::comment))
         .route("/tickets/{id}/runs", get(work::ticket_runs))
         // runs
         .route("/runs/{id}", get(work::get_run))
@@ -63,6 +62,13 @@ pub fn api() -> Router<SharedState> {
         // team
         .route("/me", patch(team::update_me))
         .route("/notifications", get(team::list_notifications))
+        .route("/tickets/{id}/comments", get(crate::comments::list))
+        .route("/comments", post(crate::comments::create))
+        .route(
+            "/comments/{id}",
+            patch(crate::comments::update).delete(crate::comments::delete),
+        )
+        .route("/comments/{id}/react", post(crate::comments::react))
         .route("/notifications/read", post(team::mark_read))
         // connectors & speech (coordinator workstream)
         .route("/connectors", post(crate::connectors::create))

@@ -241,6 +241,8 @@ pub struct NewRun {
     pub instructions: Option<String>,
     pub resume_session_id: Option<String>,
     pub trigger: Trigger,
+    /// Thread (root comment) the agent answers in when the run finishes (@mention runs).
+    pub reply_to: Option<Id>,
 }
 
 /// `POST /tickets/:id/assign`: drag an agent onto a ticket.
@@ -339,8 +341,13 @@ pub async fn create_run_locked(state: &SharedState, req: NewRun) -> AppResult<Ru
         ended_at: None,
         error: None,
     };
-    db.insert_run(&run, req.instructions.as_deref(), resume.as_deref())
-        .await?;
+    db.insert_run(
+        &run,
+        req.instructions.as_deref(),
+        resume.as_deref(),
+        req.reply_to,
+    )
+    .await?;
     state.upsert(Entity::Run(run.clone()));
 
     if kind == RunKind::Work {
@@ -1094,6 +1101,9 @@ async fn finish_inner(
         save_agent(state, a).await?;
     }
 
+    // An @mention started it: the agent answers in that thread.
+    crate::comments::reply_for_finished_run(state, &run).await;
+
     if !follow_up {
         return Ok(());
     }
@@ -1162,6 +1172,7 @@ pub async fn drain_review_queue_locked(state: &SharedState, agent_id: Id) {
                 instructions: None,
                 resume_session_id: None,
                 trigger: Trigger::Auto,
+                reply_to: None,
             },
         )
         .await;
@@ -1301,6 +1312,7 @@ pub async fn message(state: &SharedState, run_id: Id, text: String, by: Id) -> A
             instructions: Some(text),
             resume_session_id: run.session_id.clone(),
             trigger: Trigger::User(by),
+            reply_to: None,
         },
     )
     .await

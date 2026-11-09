@@ -4,6 +4,7 @@
 //! embedded web UI. The binary (`boba-agent`) is a thin wrapper around [`build`].
 
 pub mod auth;
+pub mod comments;
 pub mod config;
 pub mod connectors;
 pub mod db;

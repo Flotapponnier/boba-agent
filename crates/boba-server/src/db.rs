@@ -75,6 +75,13 @@ fn s(v: Option<Id>) -> Option<String> {
     v.map(|i| i.to_string())
 }
 
+/// Tickets with their comment counters (always exact: computed from the comments table).
+const TICKET_SELECT: &str = "SELECT t.*,
+    (SELECT COUNT(*) FROM comments c WHERE c.ticket_id = t.id AND c.deleted = 0) AS comment_count,
+    (SELECT COUNT(*) FROM comments c WHERE c.ticket_id = t.id AND c.parent_id IS NULL
+       AND c.resolved = 0 AND c.deleted = 0) AS open_thread_count
+  FROM tickets t";
+
 /// Automatic review attempts per entry into a review column.
 pub const REVIEW_ATTEMPTS: i64 = 2;
 
@@ -872,14 +879,13 @@ impl Db {
             created_at: time(row, "created_at")?,
             updated_at: time(row, "updated_at")?,
             source: serde_json::from_str(&row.try_get::<String, _>("source")?).unwrap_or_default(),
-            // Maintained by the comments feature (server workstream).
-            comment_count: 0,
-            open_thread_count: 0,
+            comment_count: row.try_get::<i64, _>("comment_count")? as u32,
+            open_thread_count: row.try_get::<i64, _>("open_thread_count")? as u32,
         })
     }
 
     pub async fn tickets(&self) -> anyhow::Result<Vec<Ticket>> {
-        sqlx::query("SELECT * FROM tickets ORDER BY position")
+        sqlx::query(&format!("{TICKET_SELECT} ORDER BY t.position"))
             .fetch_all(&self.pool)
             .await?
             .iter()
@@ -888,7 +894,7 @@ impl Db {
     }
 
     pub async fn ticket(&self, tid: Id) -> anyhow::Result<Option<Ticket>> {
-        sqlx::query("SELECT * FROM tickets WHERE id = ?")
+        sqlx::query(&format!("{TICKET_SELECT} WHERE t.id = ?"))
             .bind(tid.to_string())
             .fetch_optional(&self.pool)
             .await?
@@ -898,13 +904,15 @@ impl Db {
     }
 
     pub async fn tickets_in_tab(&self, tab_id: Id) -> anyhow::Result<Vec<Ticket>> {
-        sqlx::query("SELECT * FROM tickets WHERE tab_id = ? ORDER BY position")
-            .bind(tab_id.to_string())
-            .fetch_all(&self.pool)
-            .await?
-            .iter()
-            .map(Self::ticket_row)
-            .collect()
+        sqlx::query(&format!(
+            "{TICKET_SELECT} WHERE t.tab_id = ? ORDER BY t.position"
+        ))
+        .bind(tab_id.to_string())
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(Self::ticket_row)
+        .collect()
     }
 
     /// Largest position in a column (new tickets go to the bottom).
@@ -1097,10 +1105,12 @@ impl Db {
         r: &Run,
         extra_instructions: Option<&str>,
         resume_session_id: Option<&str>,
+        reply_comment_id: Option<Id>,
     ) -> anyhow::Result<()> {
         sqlx::query(
             "INSERT INTO runs(id, ticket_id, job_id, agent_id, kind, status, runner_id, created_at,
-               started_by, extra_instructions, resume_session_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               started_by, extra_instructions, resume_session_id, reply_comment_id)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.to_string())
         .bind(s(r.ticket_id))
@@ -1113,6 +1123,7 @@ impl Db {
         .bind(s(r.started_by))
         .bind(extra_instructions)
         .bind(resume_session_id)
+        .bind(s(reply_comment_id))
         .execute(&self.pool)
         .await?;
         self.save_run(r).await
@@ -1499,5 +1510,126 @@ impl Db {
         .bind(keep)
         .fetch_all(&self.pool)
         .await?)
+    }
+
+    // ------------------------------------------------------------ comments
+
+    pub async fn run_reply_comment(&self, rid: Id) -> anyhow::Result<Option<Id>> {
+        let v: Option<Option<String>> =
+            sqlx::query_scalar("SELECT reply_comment_id FROM runs WHERE id = ?")
+                .bind(rid.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+        v.flatten()
+            .map(|s| Id::parse_str(&s).map_err(Into::into))
+            .transpose()
+    }
+
+    /// Latest Claude Code session of `agent` on `ticket` (to resume on a mention).
+    pub async fn last_agent_session(
+        &self,
+        ticket: Id,
+        agent: Id,
+    ) -> anyhow::Result<Option<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT session_id FROM runs WHERE ticket_id = ? AND agent_id = ?
+               AND session_id IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(ticket.to_string())
+        .bind(agent.to_string())
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    fn comment_row(row: &SqliteRow) -> anyhow::Result<boba_core::team::Comment> {
+        let j = |c: &str| -> anyhow::Result<String> { Ok(row.try_get::<String, _>(c)?) };
+        Ok(boba_core::team::Comment {
+            id: id(row, "id")?,
+            ticket_id: opt_id(row, "ticket_id")?,
+            job_id: opt_id(row, "job_id")?,
+            anchor: serde_json::from_str(&j("anchor")?)?,
+            parent_id: opt_id(row, "parent_id")?,
+            author_kind: dec(&j("author_kind")?)?,
+            author_id: id(row, "author_id")?,
+            body: j("body")?,
+            mentioned_user_ids: serde_json::from_str(&j("mentioned_user_ids")?).unwrap_or_default(),
+            mentioned_agent_ids: serde_json::from_str(&j("mentioned_agent_ids")?)
+                .unwrap_or_default(),
+            triggered_run_ids: serde_json::from_str(&j("triggered_run_ids")?).unwrap_or_default(),
+            reactions: serde_json::from_str(&j("reactions")?).unwrap_or_default(),
+            resolved: row.try_get::<i64, _>("resolved")? != 0,
+            resolved_by: opt_id(row, "resolved_by")?,
+            created_at: time(row, "created_at")?,
+            edited_at: opt_time(row, "edited_at")?,
+            deleted: row.try_get::<i64, _>("deleted")? != 0,
+        })
+    }
+
+    pub async fn comment(&self, cid: Id) -> anyhow::Result<Option<boba_core::team::Comment>> {
+        sqlx::query("SELECT * FROM comments WHERE id = ?")
+            .bind(cid.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .as_ref()
+            .map(Self::comment_row)
+            .transpose()
+    }
+
+    pub async fn ticket_comments(&self, tid: Id) -> anyhow::Result<Vec<boba_core::team::Comment>> {
+        sqlx::query("SELECT * FROM comments WHERE ticket_id = ? ORDER BY created_at, id")
+            .bind(tid.to_string())
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .map(Self::comment_row)
+            .collect()
+    }
+
+    /// A root and its replies.
+    pub async fn thread(&self, root: Id) -> anyhow::Result<Vec<boba_core::team::Comment>> {
+        sqlx::query(
+            "SELECT * FROM comments WHERE id = ?1 OR parent_id = ?1 ORDER BY created_at, id",
+        )
+        .bind(root.to_string())
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(Self::comment_row)
+        .collect()
+    }
+
+    pub async fn save_comment(&self, c: &boba_core::team::Comment) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO comments(id, ticket_id, job_id, anchor, parent_id, author_kind, author_id, body,
+               mentioned_user_ids, mentioned_agent_ids, triggered_run_ids, reactions, resolved,
+               resolved_by, created_at, edited_at, deleted)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET body = excluded.body,
+               mentioned_user_ids = excluded.mentioned_user_ids,
+               mentioned_agent_ids = excluded.mentioned_agent_ids,
+               triggered_run_ids = excluded.triggered_run_ids, reactions = excluded.reactions,
+               resolved = excluded.resolved, resolved_by = excluded.resolved_by,
+               edited_at = excluded.edited_at, deleted = excluded.deleted",
+        )
+        .bind(c.id.to_string())
+        .bind(s(c.ticket_id))
+        .bind(s(c.job_id))
+        .bind(json(&c.anchor))
+        .bind(s(c.parent_id))
+        .bind(enc(&c.author_kind))
+        .bind(c.author_id.to_string())
+        .bind(&c.body)
+        .bind(json(&c.mentioned_user_ids))
+        .bind(json(&c.mentioned_agent_ids))
+        .bind(json(&c.triggered_run_ids))
+        .bind(json(&c.reactions))
+        .bind(c.resolved as i64)
+        .bind(s(c.resolved_by))
+        .bind(ts(c.created_at))
+        .bind(c.edited_at.map(ts))
+        .bind(c.deleted as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }

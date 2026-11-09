@@ -1145,11 +1145,11 @@ async fn tabs_tickets_skills_crud() {
     let (s, v) = srv
         .post(
             &c,
-            &format!("/tickets/{tid}/comment"),
-            json!({"text": "Nice"}),
+            "/comments",
+            json!({"ticket_id": tid, "anchor": {"on": "ticket"}, "body": "Nice"}),
         )
         .await;
-    assert_eq!((s, v["kind"].clone()), (StatusCode::OK, json!("comment")));
+    assert_eq!((s, v["body"].clone()), (StatusCode::OK, json!("Nice")));
     let (_, h) = srv
         .get(&c, &format!("/history?tab_id={}&limit=2", tab.id))
         .await;
@@ -1455,4 +1455,243 @@ async fn notifications_reach_only_their_owner() {
     srv.post(&member, "/notifications/read", json!({"ids": [theirs]}))
         .await;
     assert!(!srv.snapshot(&owner).await.notifications[0].read);
+}
+
+#[tokio::test]
+async fn comment_threads_mentions_and_agent_replies() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let viewer = srv.invite(&owner, "v@test.io", "viewer").await;
+    let snap = srv.snapshot(&owner).await;
+    let owner_id = snap.me.as_ref().unwrap().id;
+    let member_id = snap
+        .users
+        .iter()
+        .find(|u| u.email == "m@test.io")
+        .unwrap()
+        .id;
+    let t = snap.tickets[0].id;
+    let qa = agent(&snap, "Golden QA");
+
+    // Owner opens a thread mentioning the member.
+    let (s, root) = srv
+        .post(
+            &owner,
+            "/comments",
+            json!({"ticket_id": t, "anchor": {"on": "ticket_body", "quote": "dark theme"},
+            "body": format!("@[Mia](user:{member_id}) can you check this?")}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{root}");
+    assert_eq!(root["mentioned_user_ids"], json!([member_id]));
+    let root_id: Id = serde_json::from_value(root["id"].clone()).unwrap();
+    let tk = ticket(&srv.snapshot(&owner).await, t).clone();
+    assert_eq!((tk.comment_count, tk.open_thread_count), (1, 1));
+    let m = srv.snapshot(&member).await;
+    assert!(m
+        .notifications
+        .iter()
+        .any(|n| boba_server::db::enc(&n.kind) == "mention" && n.comment_id == Some(root_id)));
+
+    // Member replies and asks Golden QA to do it: a run starts with the comment as instructions.
+    let (s, reply) = srv
+        .post(
+            &member,
+            "/comments",
+            json!({"ticket_id": t, "anchor": {"on": "ticket"}, "parent_id": root_id,
+            "body": format!("Sure. @[Golden QA](agent:{}) please add tests", qa.id)}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{reply}");
+    assert_eq!(reply["parent_id"], json!(root_id));
+    assert_eq!(
+        reply["anchor"],
+        json!({"on": "ticket_body", "quote": "dark theme"}),
+        "replies inherit the root anchor"
+    );
+    let runs = reply["triggered_run_ids"].as_array().unwrap();
+    assert_eq!(runs.len(), 1);
+    let run_id: Id = serde_json::from_value(runs[0].clone()).unwrap();
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.run_id == run_id)
+        .unwrap();
+    let instr = spec.extra_instructions.unwrap();
+    assert!(
+        instr.contains("@Golden QA please add tests") && !instr.contains("agent:"),
+        "{instr}"
+    );
+    // Owner got a Reply notification (thread participant).
+    let o = srv.snapshot(&owner).await;
+    assert!(o
+        .notifications
+        .iter()
+        .any(|n| boba_server::db::enc(&n.kind) == "reply"));
+
+    // When the run finishes, the agent answers in the thread.
+    srv.until(&owner, "agent reply", |s| {
+        ticket(s, t).comment_count == 3 && all_idle(s)
+    })
+    .await;
+    let (_, list) = srv.get(&viewer, &format!("/tickets/{t}/comments")).await;
+    let list: Vec<boba_core::team::Comment> = serde_json::from_value(list).unwrap();
+    let answer = list
+        .iter()
+        .find(|c| c.author_kind == boba_core::team::CommentAuthorKind::Agent)
+        .unwrap();
+    assert_eq!((answer.author_id, answer.parent_id), (qa.id, Some(root_id)));
+    assert_eq!(answer.body, "done");
+    assert_eq!(answer.triggered_run_ids, vec![run_id]);
+
+    // A viewer cannot comment and an agent mention by a viewer is impossible anyway.
+    assert_eq!(
+        srv.post(
+            &viewer,
+            "/comments",
+            json!({"ticket_id": t, "anchor": {"on": "ticket"}, "body": "hi"})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+
+    // Reactions toggle; viewers may react.
+    let (s, v) = srv
+        .post(
+            &viewer,
+            &format!("/comments/{root_id}/react"),
+            json!({"emoji": "🧋"}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["reactions"][0]["user_ids"].as_array().unwrap().len(), 1);
+    let (_, v) = srv
+        .post(
+            &viewer,
+            &format!("/comments/{root_id}/react"),
+            json!({"emoji": "🧋"}),
+        )
+        .await;
+    assert_eq!(v["reactions"], json!([]));
+    assert_eq!(
+        srv.post(
+            &viewer,
+            &format!("/comments/{root_id}/react"),
+            json!({"emoji": "lol"})
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Edit: author only. Resolve: EditTickets, roots only.
+    assert_eq!(
+        srv.req(
+            &member,
+            "PATCH",
+            &format!("/comments/{root_id}"),
+            Some(json!({"body": "hijack"}))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (s, v) = srv
+        .req(
+            &owner,
+            "PATCH",
+            &format!("/comments/{root_id}"),
+            Some(json!({"body": "edited"})),
+        )
+        .await;
+    assert_eq!((s, v["body"].clone()), (StatusCode::OK, json!("edited")));
+    assert!(v["edited_at"].is_string());
+    let reply_id = reply["id"].as_str().unwrap();
+    assert_eq!(
+        srv.req(
+            &member,
+            "PATCH",
+            &format!("/comments/{reply_id}"),
+            Some(json!({"resolved": true}))
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (s, v) = srv
+        .req(
+            &member,
+            "PATCH",
+            &format!("/comments/{root_id}"),
+            Some(json!({"resolved": true})),
+        )
+        .await;
+    assert_eq!(
+        (s, v["resolved"].clone(), v["resolved_by"].clone()),
+        (StatusCode::OK, json!(true), json!(member_id))
+    );
+    assert_eq!(ticket(&srv.snapshot(&owner).await, t).open_thread_count, 0);
+
+    // Soft delete: author or admin; the thread stays.
+    assert_eq!(
+        srv.req(&viewer, "DELETE", &format!("/comments/{reply_id}"), None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        srv.req(&owner, "DELETE", &format!("/comments/{reply_id}"), None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, list) = srv.get(&owner, &format!("/tickets/{t}/comments")).await;
+    let gone = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == json!(reply_id))
+        .unwrap();
+    assert_eq!(
+        (gone["deleted"].clone(), gone["body"].clone()),
+        (json!(true), json!(""))
+    );
+    assert_eq!(ticket(&srv.snapshot(&owner).await, t).comment_count, 2);
+    let _ = owner_id;
+}
+
+#[tokio::test]
+async fn busy_agent_answers_why_it_cannot_start() {
+    let srv = start().await;
+    srv.runner.hang(true);
+    let owner = srv.owner().await;
+    let snap = srv.snapshot(&owner).await;
+    let (t1, t2) = (snap.tickets[0].id, snap.tickets[1].id);
+    let dev = agent(&snap, "Boba Dev").id;
+    srv.post(
+        &owner,
+        &format!("/tickets/{t1}/assign"),
+        json!({"agent_id": dev}),
+    )
+    .await;
+    let (s, c) = srv
+        .post(
+            &owner,
+            "/comments",
+            json!({"ticket_id": t2, "anchor": {"on": "ticket"},
+            "body": format!("@[Boba Dev](agent:{dev}) and this one?")}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{c}");
+    assert_eq!(c["triggered_run_ids"], json!([]));
+    let (_, list) = srv.get(&owner, &format!("/tickets/{t2}/comments")).await;
+    let answer = &list.as_array().unwrap()[1];
+    assert_eq!(answer["author_kind"], "agent");
+    assert!(
+        answer["body"].as_str().unwrap().contains("busy"),
+        "{answer}"
+    );
 }
