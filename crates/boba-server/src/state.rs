@@ -27,6 +27,8 @@ pub struct AppState {
     pub runners: crate::router::Runners,
     /// GitHub client for repo sync (lazily created from GH_TOKEN / `gh auth`).
     pub github: Mutex<Option<boba_github::GitHub>>,
+    /// GitHub App runtime state (manifest states, installation token cache).
+    pub gh_app: crate::github_app::Runtime,
     /// Per-run bearer tokens of the board-tools MCP endpoint.
     pub board_tokens: crate::board_tools::Tokens,
     /// Remote runners by id (the slot table holds them too, while registered).
@@ -92,6 +94,7 @@ impl AppState {
             hub: Hub::new(),
             runners,
             github: Mutex::new(None),
+            gh_app: Default::default(),
             board_tokens: Default::default(),
             remotes: StdMutex::new(HashMap::new()),
             orch_lock: Mutex::new(()),

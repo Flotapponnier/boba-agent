@@ -25,6 +25,12 @@ pub struct Config {
     pub local_runner_owner: Option<String>,
     /// `BOBA_GITHUB_WEBHOOK_SECRET`: enables `POST /api/github/webhook` (HMAC-checked).
     pub github_webhook_secret: Option<String>,
+    /// GitHub REST API base (`BOBA_GITHUB_API`, GitHub Enterprise: `https://ghe/api/v3`).
+    pub github_api: String,
+    /// GitHub web base (`BOBA_GITHUB_WEB`), for the app manifest form and clone URLs.
+    pub github_web: String,
+    /// Where repos added from GitHub are cloned (`BOBA_REPOS_DIR`, default `<data>/repos`).
+    pub repos_dir: PathBuf,
 }
 
 impl Config {
@@ -40,6 +46,7 @@ impl Config {
         let data_dir = std::env::var("BOBA_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./data"));
+        let repos_default = data_dir.join("repos");
         // A shared server needs organisation credentials: a personal Claude subscription
         // login must not be shared (Anthropic's terms). Whether the `claude` binary actually
         // works is checked at startup (`main`), which falls back to demo mode otherwise.
@@ -69,6 +76,17 @@ impl Config {
             secure_cookies,
             allow_bypass: env_set("BOBA_ALLOW_BYPASS"),
             claude_subscription,
+            github_api: std::env::var("BOBA_GITHUB_API")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "https://api.github.com".into()),
+            github_web: std::env::var("BOBA_GITHUB_WEB")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "https://github.com".into()),
+            repos_dir: std::env::var("BOBA_REPOS_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| repos_default.clone()),
             github_webhook_secret: std::env::var("BOBA_GITHUB_WEBHOOK_SECRET")
                 .ok()
                 .filter(|s| !s.trim().is_empty()),
@@ -81,6 +99,7 @@ impl Config {
 
     /// Config for tests: ephemeral data dir, demo mode.
     pub fn for_tests(data_dir: PathBuf) -> Self {
+        let repos_default = data_dir.join("repos");
         Self {
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
             data_dir,
@@ -92,6 +111,9 @@ impl Config {
             claude_subscription: false,
             local_runner_owner: None,
             github_webhook_secret: None,
+            github_api: "https://api.github.com".into(),
+            github_web: "https://github.com".into(),
+            repos_dir: repos_default,
         }
     }
 

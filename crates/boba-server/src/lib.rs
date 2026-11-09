@@ -11,6 +11,7 @@ pub mod config;
 pub mod connectors;
 pub mod db;
 pub mod error;
+pub mod github_app;
 pub mod hub;
 pub mod jobs;
 pub mod notify;

@@ -496,7 +496,7 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         RunKind::Command => Some(crate::concierge::spec(state, run).await?),
         _ => None,
     };
-    let (ticket_spec, job_spec, repo) = match run.job_id {
+    let (ticket_spec, job_spec, mut repo) = match run.job_id {
         _ if command_spec.is_some() => (None, None, None),
         Some(job_id) => {
             let job = db.job(job_id).await?.ok_or(AppError::NotFound("job"))?;
@@ -536,6 +536,10 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         }
     };
 
+    // GitHub App: a short-lived push token for repos it is installed on, trusted runners only.
+    if let Some(r) = repo.as_mut() {
+        attach_git_credentials(state, run, r).await?;
+    }
     let skills = db.skills().await?;
     let agent_skills: Vec<_> = agent
         .skill_ids
@@ -620,22 +624,7 @@ async fn connector_servers_for(
     if agent.connector_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let slot = state
-        .runners
-        .by_id(run.runner_id)
-        .ok_or_else(|| AppError::conflict("the runner of this run is gone"))?;
-    let trusted = match &slot.remote {
-        None => true,
-        Some(_) if slot.scope == boba_core::team::RunnerScope::Shared => true,
-        Some(_) => match slot.owner_id {
-            Some(owner) => state
-                .db
-                .user(owner)
-                .await?
-                .is_some_and(|u| u.role.grants(Permission::ManageAutomations)),
-            None => false,
-        },
-    };
+    let trusted = runner_trusted(state, run).await?;
     let servers = crate::connectors::resolve_mcp_servers(&state.db, agent).await?;
     if trusted {
         return Ok(servers);
@@ -654,6 +643,54 @@ async fn connector_servers_for(
             .await;
     }
     Ok(Vec::new())
+}
+
+async fn attach_git_credentials(
+    state: &SharedState,
+    run: &Run,
+    repo: &mut RepoSpec,
+) -> AppResult<()> {
+    let Some(full) = repo
+        .remote_url
+        .as_deref()
+        .and_then(boba_github::RepoRef::parse)
+        .map(|r| r.full_name())
+    else {
+        return Ok(());
+    };
+    let Some(creds) = crate::github_app::creds(state).await? else {
+        return Ok(());
+    };
+    if !runner_trusted(state, run).await? {
+        return Ok(()); // personal runners use their own git credentials
+    }
+    if let Some(token) = crate::github_app::token_for_repo(state, &full).await {
+        repo.git_token = Some(boba_core::runner::SecretString(token));
+        repo.git_author = Some(crate::github_app::git_author(&creds));
+    }
+    Ok(())
+}
+
+/// May this run's runner receive server secrets (connector secrets, GitHub tokens)?
+/// The built-in runner(s), Shared remote runners (registered by an admin), and personal
+/// runners whose owner may manage automations (and could read those secrets anyway).
+async fn runner_trusted(state: &SharedState, run: &Run) -> AppResult<bool> {
+    let slot = state
+        .runners
+        .by_id(run.runner_id)
+        .ok_or_else(|| AppError::conflict("the runner of this run is gone"))?;
+    Ok(match &slot.remote {
+        None => true,
+        Some(_) if slot.scope == boba_core::team::RunnerScope::Shared => true,
+        Some(_) => match slot.owner_id {
+            Some(owner) => state
+                .db
+                .user(owner)
+                .await?
+                .is_some_and(|u| u.role.grants(Permission::ManageAutomations)),
+            None => false,
+        },
+    })
 }
 
 /// Hand every not-yet-dispatched queued run to the runner (oldest first).
