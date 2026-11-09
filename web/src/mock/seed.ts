@@ -156,6 +156,7 @@ export function seed(): MockState {
   ];
 
   const agents: Agent[] = [
+    agent('concierge', 'Concierge', 'Concierge', 'golden_boba', '#ffd23f', 'At your service.', 'Built-in: reads the board and proposes actions. Never acts without confirmation.', [], { permission_mode: 'plan', created_at: iso(30 * D) }),
     agent('a_dev', 'Boba Dev', 'Dev', 'boba', '#f39c12', 'Ships it with tests, every time.', 'You are Boba Dev, a full-stack developer. Work in your worktree, write tests first and open a clean PR.', ['sk_ts', 'sk_react', 'sk_tests'], { xp: 60, level: 3, runs_completed: 14, prs_approved: 11 }),
     agent('a_uncle', 'Uncle Review', 'Reviewer', 'boba_uncle', '#3498db', 'No file:line, no approval.', 'You are Uncle Review. Review every PR with the pr-review skill, cite file:line, never merge yourself.', ['sk_review', 'sk_security'], { xp: 120, level: 4, runs_completed: 23, permission_mode: 'plan' }),
     agent('a_pinky', 'Pinky SEO', 'SEO', 'pinky_boba', '#ff6fb5', 'Every page deserves a meta.', 'You are Pinky SEO. Audit pages, meta tags, sitemap and llms.txt.', ['sk_seo'], { xp: 40, level: 2, runs_completed: 5, prs_approved: 4, connector_ids: ['cn_gsc'], board_tools: true }),

@@ -42,7 +42,7 @@ import type { Comment, CreateComment, CreateRunner, Notification, RunnerInfo, Up
 
 const NOPE = Symbol('nope');
 
-const STORE_KEY = 'boba-mock-v7';
+const STORE_KEY = 'boba-mock-v8';
 const now = () => new Date().toISOString();
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
@@ -525,6 +525,7 @@ class MockServer implements Transport {
         return a;
       }
       if (method === 'DELETE') {
+        if (a.role.toLowerCase() === 'concierge') throw new ApiFailure(409, 'The Concierge is built in and cannot be dismissed.', 'conflict');
         if (a.status !== 'idle') throw new ApiFailure(409, `${a.name} is working. Cancel the run first.`, 'conflict');
         this.s.agents = this.s.agents.filter((y) => y !== a);
         for (const t of this.s.tabs)
@@ -1341,7 +1342,7 @@ class MockServer implements Transport {
       ticket_id: req?.ticket_id ?? null,
       agent_id: req?.agent_id ?? null,
       tabs: this.s.tabs,
-      agents: this.s.agents,
+      agents: this.s.agents.filter((a) => a.role.toLowerCase() !== 'concierge'),
       tickets: this.s.tickets,
       jobs: this.s.jobs,
       repos: this.s.repos,
@@ -1732,7 +1733,7 @@ class MockServer implements Transport {
     const busy = this.s.runs.filter((r) => r.status === 'running' || r.status === 'waiting').length;
     if (busy >= 2 && !force) return;
     const todo = this.s.tickets.filter((t) => this.column(t.column_id)?.kind === 'todo' && !this.activeRun(t.id) && !t.review_feedback);
-    const idle = this.s.agents.filter((a) => a.status === 'idle' && a.role.toLowerCase() !== 'reviewer');
+    const idle = this.s.agents.filter((a) => a.status === 'idle' && !['reviewer', 'concierge'].includes(a.role.toLowerCase()));
     if (!todo.length || !idle.length) return;
     const t = pick(todo);
     const a = pick(idle);

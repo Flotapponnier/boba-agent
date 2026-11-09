@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { api } from '../../api/client';
 import type { Run } from '../../api/types';
-import { MODELS, xpForNextLevel, xpPct } from '../../lib/game';
+import { MODELS, isConcierge, xpForNextLevel, xpPct } from '../../lib/game';
 import { duration, timeAgo, usd } from '../../lib/format';
 import { deleteAgent } from '../../store/actions';
 import { isActive, useCan } from '../../store/selectors';
@@ -183,7 +183,8 @@ export function AgentPanel({ agentId }: { agentId: string }) {
         </button>
         {showPrompt && <div className="prompt-box" style={{ marginTop: 6 }}>{a.system_prompt || '(empty)'}</div>}
 
-        {canManage && (
+        {isConcierge(a) && <p className="hint-text" style={{ marginTop: 10 }}>The Concierge is built in: it reads the board and proposes actions from the ⌘K bar, and never acts without your confirmation.</p>}
+        {canManage && !isConcierge(a) && (
           <div className="row" style={{ marginTop: 12 }}>
             <button className="btn gold sm" onClick={() => ui.show({ kind: 'agent-edit', id: a.id })}>
               ✏ Edit persona

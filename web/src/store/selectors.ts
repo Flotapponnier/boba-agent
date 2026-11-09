@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Column, Permission, Run, Tab, Ticket } from '../api/types';
-import { grants } from '../lib/game';
+import { grants, isConcierge } from '../lib/game';
 import { useBoard } from './store';
 
 export const ACTIVE: Run['status'][] = ['queued', 'running', 'waiting'];
@@ -57,9 +57,15 @@ export function useTicketRuns(ticketId: string): Run[] {
   );
 }
 
+/** Agents you can drag, pick and assign: everyone but the built-in Concierge. */
 export function useAgentsList() {
   const agents = useBoard((s) => s.agents);
-  return useMemo(() => Object.values(agents).sort((a, b) => a.created_at.localeCompare(b.created_at)), [agents]);
+  return useMemo(() => Object.values(agents).filter((a) => !isConcierge(a)).sort((a, b) => a.created_at.localeCompare(b.created_at)), [agents]);
+}
+
+/** The built-in Concierge agent, when the server has one. */
+export function useConcierge() {
+  return useBoard((s) => Object.values(s.agents).find(isConcierge));
 }
 
 export function useOpenTicketCount(tabId: string): number {
