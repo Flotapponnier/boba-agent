@@ -27,6 +27,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use boba_core::automation::{JobOutput, McpTransport, TicketSource};
 use boba_core::runner::{RunOutcome, RunSpec, RunUpdate};
+use boba_core::team::RunnerAuth;
 use boba_core::{Id, LogKind, PermissionMode, ReviewVerdict, RunKind, RunStatus, Skill};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -123,6 +124,18 @@ pub const ENV_WHITELIST: &[&str] = &[
     "GOOGLE_APPLICATION_CREDENTIALS",
 ];
 
+/// How this machine's Claude Code authenticates (`BOBA_CLAUDE_AUTH`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthMode {
+    /// `ANTHROPIC_API_KEY` / auth token, or Bedrock / Vertex. Allows a per-agent
+    /// `CLAUDE_CONFIG_DIR`.
+    ApiKey,
+    /// The machine user's own Claude Pro/Max login (`claude auth login`). Uses the default
+    /// config dir (a fresh one has no login), and API-key variables are never passed, so
+    /// runs cannot silently bill a key instead.
+    Subscription,
+}
+
 #[derive(Debug, Clone)]
 pub struct ClaudeConfig {
     pub id: Id,
@@ -132,8 +145,9 @@ pub struct ClaudeConfig {
     pub tools: Tools,
     pub max_concurrent_runs: u32,
     pub run_timeout: Duration,
-    /// Per-agent `CLAUDE_CONFIG_DIR`. Needs API-key (or Bedrock/Vertex) auth: a fresh
-    /// config dir has no OAuth login.
+    pub auth_mode: AuthMode,
+    /// Per-agent `CLAUDE_CONFIG_DIR` (API-key mode only: ignored with
+    /// [`AuthMode::Subscription`], since a fresh config dir has no OAuth login).
     pub isolate_config_dir: bool,
     /// `bypassPermissions` is honoured only when true (run inside a container).
     pub allow_bypass: bool,
@@ -154,6 +168,7 @@ impl ClaudeConfig {
             tools: Tools::default(),
             max_concurrent_runs: 4,
             run_timeout: Duration::from_secs(2 * 60 * 60),
+            auth_mode: AuthMode::ApiKey,
             isolate_config_dir: api_key_auth_available(),
             allow_bypass: false,
             env_passthrough: Vec::new(),
@@ -162,7 +177,7 @@ impl ClaudeConfig {
         }
     }
 
-    /// [`ClaudeConfig::new`] plus `BOBA_CLAUDE_BIN`, `BOBA_GIT_BIN`, `BOBA_GH_BIN`,
+    /// [`ClaudeConfig::new`] plus `BOBA_CLAUDE_AUTH` (`api_key` | `subscription`), `BOBA_CLAUDE_BIN`, `BOBA_GIT_BIN`, `BOBA_GH_BIN`,
     /// `BOBA_MAX_CONCURRENT_RUNS`, `BOBA_RUN_TIMEOUT_SECS`, `BOBA_ISOLATE_CLAUDE_CONFIG`
     /// (0/1), `BOBA_ALLOW_BYPASS` (0/1), `BOBA_ENV_PASSTHROUGH` (comma list),
     /// `BOBA_OPEN_PRS` (0/1), `BOBA_KEEP_WORKTREES` (0/1).
@@ -170,6 +185,18 @@ impl ClaudeConfig {
         let mut c = Self::new(id, data_dir);
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         let flag = |k: &str| var(k).map(|v| matches!(v.trim(), "1" | "true" | "yes" | "on"));
+        match var("BOBA_CLAUDE_AUTH")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("subscription" | "oauth" | "claude.ai" | "max" | "pro") => {
+                c.auth_mode = AuthMode::Subscription
+            }
+            Some("api_key" | "apikey" | "api-key" | "key") | None => {}
+            Some(other) => tracing::warn!(
+                "ignoring BOBA_CLAUDE_AUTH={other:?} (expected api_key or subscription)"
+            ),
+        }
         if let Some(v) = var("BOBA_CLAUDE_BIN") {
             c.claude_bin = v.into();
         }
@@ -214,6 +241,87 @@ impl ClaudeConfig {
     }
 }
 
+impl ClaudeConfig {
+    /// Whether runs get a per-agent `CLAUDE_CONFIG_DIR`.
+    pub fn isolates_config(&self) -> bool {
+        self.auth_mode == AuthMode::ApiKey && self.isolate_config_dir
+    }
+
+    /// The environment every `claude` process gets (whitelist + passthrough), before the
+    /// per-run additions.
+    pub fn base_env(&self) -> Vec<(String, String)> {
+        let subscription = self.auth_mode == AuthMode::Subscription;
+        let mut keys: Vec<&str> = ENV_WHITELIST.to_vec();
+        if !self.isolates_config() {
+            // A custom default config dir (where the login lives) must be kept.
+            keys.push("CLAUDE_CONFIG_DIR");
+        }
+        keys.extend(self.env_passthrough.iter().map(String::as_str));
+        keys.into_iter()
+            .filter(|k| !(subscription && API_AUTH_VARS.contains(k)))
+            .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
+            .collect()
+    }
+}
+
+/// Variables that make Claude Code use an API key or a cloud provider instead of a login.
+pub const API_AUTH_VARS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+];
+
+/// Map `claude auth status --json` to a [`RunnerAuth`], checking it fits `mode`.
+pub fn parse_auth_status(json: &str, mode: AuthMode) -> Result<RunnerAuth, String> {
+    let v: Value = serde_json::from_str(json.trim()).map_err(|e| {
+        format!(
+            "`claude auth status` printed something unexpected ({e}): {}",
+            first_line(json, 200)
+        )
+    })?;
+    let logged_in = v.get("loggedIn").and_then(Value::as_bool).unwrap_or(false);
+    let method = v
+        .get("authMethod")
+        .and_then(Value::as_str)
+        .unwrap_or("none");
+    let provider = v
+        .get("apiProvider")
+        .and_then(Value::as_str)
+        .unwrap_or("firstParty");
+    let auth = match (provider, method) {
+        ("bedrock", _) => RunnerAuth::Bedrock,
+        ("vertex", _) => RunnerAuth::Vertex,
+        (_, "claude.ai") => RunnerAuth::Subscription,
+        (_, "api_key" | "apiKey" | "oauth_token" | "auth_token" | "api_key_helper") => {
+            RunnerAuth::ApiKey
+        }
+        _ => RunnerAuth::Unknown,
+    };
+    if !logged_in || auth == RunnerAuth::Unknown && method == "none" {
+        return Err(match mode {
+            AuthMode::Subscription => "Claude Code is not logged in. Run `claude auth login` as the user that runs \
+                                       Boba Agent (BOBA_CLAUDE_AUTH=subscription)."
+                .into(),
+            AuthMode::ApiKey => "Claude Code has no credentials: set ANTHROPIC_API_KEY (or Bedrock / Vertex), or log \
+                                 in with `claude auth login` and set BOBA_CLAUDE_AUTH=subscription."
+                .into(),
+        });
+    }
+    match (mode, auth) {
+        (AuthMode::Subscription, RunnerAuth::Subscription) => Ok(auth),
+        (AuthMode::Subscription, other) => Err(format!(
+            "BOBA_CLAUDE_AUTH=subscription but Claude Code authenticates with {other:?} ({method}). Run `claude auth login`."
+        )),
+        (AuthMode::ApiKey, RunnerAuth::Subscription) => Err(
+            "Claude Code is using a claude.ai login but BOBA_CLAUDE_AUTH is api_key: set BOBA_CLAUDE_AUTH=subscription \
+             (personal use) or provide ANTHROPIC_API_KEY."
+                .into(),
+        ),
+        (AuthMode::ApiKey, a) => Ok(a),
+    }
+}
+
 /// True when Claude Code can authenticate without the server user's OAuth login.
 pub fn api_key_auth_available() -> bool {
     [
@@ -229,6 +337,7 @@ pub fn api_key_auth_available() -> bool {
 struct Inner {
     cfg: ClaudeConfig,
     table: Arc<RunTable>,
+    auth: std::sync::Mutex<RunnerAuth>,
 }
 
 #[derive(Clone)]
@@ -254,12 +363,66 @@ impl ClaudeCodeRunner {
         }
         let table = Arc::new(RunTable::new(cfg.max_concurrent_runs));
         Ok(Self {
-            inner: Arc::new(Inner { cfg, table }),
+            inner: Arc::new(Inner {
+                cfg,
+                table,
+                auth: std::sync::Mutex::new(RunnerAuth::Unknown),
+            }),
         })
     }
 
     pub fn active_runs(&self) -> usize {
         self.inner.table.len()
+    }
+
+    /// [`ClaudeCodeRunner::new`], then check the CLI is installed and logged in the way
+    /// `auth_mode` says. Errors are meant to be shown to the operator as is.
+    pub async fn connect(cfg: ClaudeConfig) -> anyhow::Result<Self> {
+        let r = Self::new(cfg)?;
+        r.claude_version()
+            .await
+            .map_err(|e| anyhow::anyhow!("Claude Code CLI not usable: {e:#}"))?;
+        r.detect_auth().await?;
+        Ok(r)
+    }
+
+    /// The auth found by the last [`detect_auth`](Self::detect_auth) (Unknown before).
+    pub fn auth(&self) -> RunnerAuth {
+        self.inner
+            .auth
+            .lock()
+            .map(|a| *a)
+            .unwrap_or(RunnerAuth::Unknown)
+    }
+
+    pub fn auth_mode(&self) -> AuthMode {
+        self.inner.cfg.auth_mode
+    }
+
+    /// Run `claude auth status --json` with the same environment runs get.
+    pub async fn detect_auth(&self) -> anyhow::Result<RunnerAuth> {
+        let cfg = &self.inner.cfg;
+        let mut cmd = Command::new(&cfg.claude_bin);
+        cmd.args(["auth", "status", "--json"])
+            .current_dir(&cfg.data_dir)
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .env_clear()
+            .envs(cfg.base_env());
+        if cfg.isolates_config() {
+            let probe = cfg.data_dir.join("agents").join("_probe").join("claude");
+            std::fs::create_dir_all(&probe)?;
+            cmd.env("CLAUDE_CONFIG_DIR", probe);
+        }
+        let out = tokio::time::timeout(Duration::from_secs(30), cmd.output())
+            .await
+            .map_err(|_| anyhow::anyhow!("`claude auth status` timed out"))??;
+        let auth = parse_auth_status(&String::from_utf8_lossy(&out.stdout), cfg.auth_mode)
+            .map_err(anyhow::Error::msg)?;
+        if let Ok(mut a) = self.inner.auth.lock() {
+            *a = auth;
+        }
+        Ok(auth)
     }
 
     /// `claude --version`, to check the CLI is installed before choosing this runner.
@@ -885,16 +1048,8 @@ fn build_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
-        .env_clear();
-    for k in ENV_WHITELIST
-        .iter()
-        .copied()
-        .chain(cfg.env_passthrough.iter().map(String::as_str))
-    {
-        if let Ok(v) = std::env::var(k) {
-            cmd.env(k, v);
-        }
-    }
+        .env_clear()
+        .envs(cfg.base_env());
     cmd.env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
         .env("DISABLE_AUTOUPDATER", "1")
         .env("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1")
@@ -904,7 +1059,7 @@ fn build_command(
     if let Some(t) = &spec.ticket {
         cmd.env("BOBA_TICKET", format!("T-{}", t.number));
     }
-    if cfg.isolate_config_dir {
+    if cfg.isolates_config() {
         let dir = cfg
             .data_dir
             .join("agents")

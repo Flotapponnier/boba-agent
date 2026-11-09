@@ -22,7 +22,7 @@ pub mod skills;
 pub mod table;
 pub mod util;
 
-pub use claude::{ClaudeCodeRunner, ClaudeConfig};
+pub use claude::{AuthMode, ClaudeCodeRunner, ClaudeConfig};
 pub use demo::{DemoConfig, DemoRunner};
 
 use async_trait::async_trait;

@@ -13,6 +13,19 @@ for a in "$@"; do
   prev="$a"
 done
 out="${FAKE_OUT:-/tmp}"
+if [ "${1:-}" = "--version" ]; then
+  echo "9.9.9 (Claude Code)"
+  exit 0
+fi
+if [ "${1:-}" = "auth" ]; then
+  env > "$out/auth_env.txt"
+  if [ -n "${FAKE_AUTH:-}" ]; then
+    printf '%s\n' "$FAKE_AUTH"
+  else
+    echo '{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty"}'
+  fi
+  exit 0
+fi
 printf '%s\n' "$@" > "$out/args.txt"
 env > "$out/env.txt"
 pwd > "$out/cwd.txt"
