@@ -214,7 +214,11 @@ over `WS /api/runners/ws` with the `RunnerWire` protocol (outbound only, works b
   which Anthropic's terms do not allow.
 - Routing: a run started by user U goes to U's online personal runner if U has one (and the repo
   exists there), otherwise to a shared runner with a free slot, otherwise it stays Queued.
-  Jobs and auto reviews only ever use shared runners.
+  Jobs and auto reviews follow the same rule with a "responsible human": the person who clicked
+  "Run now" (or created the job) for jobs, and the person who started the ticket's latest work run
+  for auto reviews. So reviewing your own work runs on your own personal runner; reviewing someone
+  else's work never does.
+- A remote runner's capacity is `min(UI setting, runner --max-runs)`.
 - Connector secrets never leave the server for a member's machine: decrypted MCP servers are only
   sent to the built-in runner(s), Shared remote runners, and personal runners whose owner has
   `ManageAutomations`. Elsewhere the connector is dropped from the run with a log line.
