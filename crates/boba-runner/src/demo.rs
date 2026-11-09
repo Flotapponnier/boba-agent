@@ -20,7 +20,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use boba_core::runner::{RunOutcome, RunSpec, RunUpdate};
+use boba_core::automation::TicketSource;
+use boba_core::runner::{RunOutcome, RunSpec, RunUpdate, TicketSpec};
 use boba_core::{Id, PermissionMode, ReviewVerdict, RunKind, RunStatus, Skill};
 use serde_json::json;
 use tokio::sync::{mpsc, Semaphore};
@@ -397,10 +398,39 @@ async fn run_script(
         cost_usd: 0.0,
         answers: HashMap::new(),
     };
-    let plan = Plan::new(&spec, &mut ctx.rng);
     match spec.kind {
-        RunKind::Work => work(&inner, &spec, &plan, &mut ctx).await,
-        RunKind::Review => review(&inner, &spec, &plan, &mut ctx).await,
+        RunKind::Work | RunKind::Review => {
+            let Some(t) = spec.ticket.clone() else {
+                return Ok(emit::failed(format!(
+                    "{:?} run without a ticket",
+                    spec.kind
+                )));
+            };
+            let plan = Plan::new(&t.title, &t.tags, &t.body, &mut ctx.rng);
+            if spec.kind == RunKind::Work {
+                work(&inner, &spec, &t, &plan, &mut ctx).await
+            } else {
+                review(&inner, &spec, &t, &plan, &mut ctx).await
+            }
+        }
+        RunKind::Job => job::run(&inner, &spec, &mut ctx).await,
+        RunKind::Command => concierge::run(&spec, &mut ctx).await,
+    }
+}
+
+fn default_branch(spec: &RunSpec) -> &str {
+    spec.repo
+        .as_ref()
+        .map(|r| r.default_branch.as_str())
+        .unwrap_or("main")
+}
+
+/// `T-42` for tickets, `job-<slug>` for the synthetic ticket of a PR job (number 0).
+fn ticket_label(t: &TicketSpec) -> String {
+    if t.number > 0 {
+        format!("T-{}", t.number)
+    } else {
+        format!("job-{}", slugify(&t.title))
     }
 }
 
@@ -429,14 +459,8 @@ struct Plan {
 }
 
 impl Plan {
-    fn new(spec: &RunSpec, rng: &mut Rng) -> Self {
-        let hay = format!(
-            "{} {} {}",
-            spec.ticket.title,
-            spec.ticket.tags.join(" "),
-            spec.ticket.body
-        )
-        .to_lowercase();
+    fn new(title: &str, tags: &[String], body: &str, rng: &mut Rng) -> Self {
+        let hay = format!("{title} {} {body}", tags.join(" ")).to_lowercase();
         let has = |words: &[&str]| words.iter().any(|w| hay.contains(w));
         let flavour = if has(&[
             "ui", "front", "css", "react", "button", "page", "web", "design", "modal", "seo",
@@ -451,7 +475,7 @@ impl Plan {
         } else {
             *rng.pick(&[Flavour::Web, Flavour::Rust, Flavour::Python])
         };
-        let words: Vec<String> = slugify(&spec.ticket.title)
+        let words: Vec<String> = slugify(title)
             .split('-')
             .filter(|w| !STOP_WORDS.contains(w))
             .take(3)
@@ -679,15 +703,14 @@ fn numbered(lines: &[String]) -> String {
 }
 
 fn pr_url(spec: &RunSpec, number: i64) -> String {
-    let base = spec
-        .repo
-        .remote_url
-        .as_deref()
+    let repo = spec.repo.as_ref();
+    let base = repo
+        .and_then(|r| r.remote_url.as_deref())
         .and_then(github_slug)
         .map(|s| format!("https://github.com/{s}"))
         .unwrap_or_else(|| {
-            let name = std::path::Path::new(&spec.repo.path)
-                .file_name()
+            let name = repo
+                .and_then(|r| std::path::Path::new(&r.path).file_name())
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "repo".into());
             format!("https://github.com/boba-demo/{name}")
@@ -708,17 +731,18 @@ pub(crate) fn github_slug(remote: &str) -> Option<String> {
 
 // ------------------------------------------------------------------ work run
 
-async fn work(inner: &Inner, spec: &RunSpec, plan: &Plan, ctx: &mut Ctx) -> Step<RunOutcome> {
-    let t = &spec.ticket;
+async fn work(
+    inner: &Inner,
+    spec: &RunSpec,
+    t: &TicketSpec,
+    plan: &Plan,
+    ctx: &mut Ctx,
+) -> Step<RunOutcome> {
     let branch = t
         .branch
         .clone()
         .unwrap_or_else(|| ticket_branch(t.number, &t.title));
-    let worktree = inner
-        .cfg
-        .data_dir
-        .join("worktrees")
-        .join(format!("T-{}", t.number));
+    let worktree = inner.cfg.data_dir.join("worktrees").join(ticket_label(t));
     let worktree = worktree.to_string_lossy().into_owned();
     let session_id = spec
         .resume_session_id
@@ -743,7 +767,7 @@ async fn work(inner: &Inner, spec: &RunSpec, plan: &Plan, ctx: &mut Ctx) -> Step
         ctx.em
             .system(format!(
                 "Worktree ready at {worktree} (new branch {branch} from {})",
-                spec.repo.default_branch
+                default_branch(spec)
             ))
             .await?;
     }
@@ -1065,17 +1089,25 @@ pub fn approval_probability(review_rounds: u32) -> f64 {
     (0.75 + 0.10 * review_rounds as f64).min(0.97)
 }
 
-async fn review(inner: &Inner, spec: &RunSpec, plan: &Plan, ctx: &mut Ctx) -> Step<RunOutcome> {
-    let t = &spec.ticket;
-    let branch = t
-        .branch
-        .clone()
-        .unwrap_or_else(|| ticket_branch(t.number, &t.title));
+async fn review(
+    inner: &Inner,
+    spec: &RunSpec,
+    t: &TicketSpec,
+    plan: &Plan,
+    ctx: &mut Ctx,
+) -> Step<RunOutcome> {
+    let branch = match &t.source {
+        TicketSource::GithubPr { head_branch, .. } => head_branch.clone(),
+        _ => t
+            .branch
+            .clone()
+            .unwrap_or_else(|| ticket_branch(t.number, &t.title)),
+    };
     let worktree = inner
         .cfg
         .data_dir
         .join("worktrees")
-        .join(format!("T-{}-review", t.number))
+        .join(format!("{}-review", ticket_label(t)))
         .to_string_lossy()
         .into_owned();
     ctx.em
@@ -1134,7 +1166,7 @@ async fn review(inner: &Inner, spec: &RunSpec, plan: &Plan, ctx: &mut Ctx) -> St
     );
     let diff_cmd = match t.pr_number {
         Some(n) => format!("gh pr diff {n}"),
-        None => format!("git diff {}...{branch}", spec.repo.default_branch),
+        None => format!("git diff {}...{branch}", default_branch(spec)),
     };
     ctx.tool(
         "Bash",
@@ -1252,6 +1284,9 @@ async fn review(inner: &Inner, spec: &RunSpec, plan: &Plan, ctx: &mut Ctx) -> St
         ..emit::outcome(RunStatus::Succeeded)
     })
 }
+
+mod concierge;
+mod job;
 
 #[cfg(test)]
 mod tests;

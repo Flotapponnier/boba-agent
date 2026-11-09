@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
             allowed_tools: vec![],
             max_turns: None,
         },
-        ticket: TicketSpec {
+        ticket: Some(TicketSpec {
             id: Uuid::now_v7(),
             number: 7,
             title: "Add rate limiting to the public API".into(),
@@ -37,12 +37,17 @@ async fn main() -> anyhow::Result<()> {
             pr_url: None,
             review_feedback: None,
             review_rounds: 0,
-        },
-        repo: RepoSpec {
+            source: Default::default(),
+        }),
+        job: None,
+        command: None,
+        repo: Some(RepoSpec {
             path: "/srv/repos/app".into(),
             default_branch: "main".into(),
             remote_url: Some("https://github.com/acme/app".into()),
-        },
+        }),
+        mcp_servers: vec![],
+        board_tools: None,
         skill_paths: vec![],
         resume_session_id: None,
         extra_instructions: None,
