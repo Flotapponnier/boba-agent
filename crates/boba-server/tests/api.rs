@@ -28,6 +28,8 @@ struct Script {
     silent: bool,
     specs: Vec<RunSpec>,
     cancelled: Vec<Id>,
+    /// What command runs answer (the parsed boba-plan block).
+    plan: Option<Value>,
 }
 
 #[derive(Clone)]
@@ -88,7 +90,7 @@ impl Runner for FakeRunner {
         4
     }
     async fn start(&self, spec: RunSpec, tx: UpdateTx) -> anyhow::Result<()> {
-        let (verdict, hang) = {
+        let (verdict, hang, plan) = {
             let mut s = self.script.lock().unwrap();
             s.specs.push(spec.clone());
             if s.silent {
@@ -101,7 +103,7 @@ impl Runner for FakeRunner {
             } else {
                 None
             };
-            (v, s.hang)
+            (v, s.hang, s.plan.clone())
         };
         self.live.lock().unwrap().push((spec.run_id, tx.clone()));
         tokio::spawn(async move {
@@ -166,7 +168,11 @@ impl Runner for FakeRunner {
                         verdict,
                         feedback,
                         error: None,
-                        plan: None,
+                        plan: if spec.kind == RunKind::Command {
+                            plan
+                        } else {
+                            None
+                        },
                     },
                 })
                 .await;
@@ -425,7 +431,7 @@ async fn auth_flow() {
     // The seeded demo workspace.
     let snap = srv.snapshot(&owner).await;
     assert_eq!(snap.tabs.len(), 3);
-    assert_eq!(snap.agents.len(), 6);
+    assert_eq!(snap.agents.len(), 7); // 6 bobas + the built-in Concierge
     assert_eq!(snap.tickets.len(), 8);
     assert!(snap.skills.iter().any(|s| s.name == "review"));
     assert_eq!(snap.settings.name, "Test Tea");
@@ -2831,5 +2837,171 @@ async fn read_only_runs_only_get_read_tools() {
     assert!(
         err && msg.as_str().unwrap_or("").contains("read-only"),
         "{r}"
+    );
+}
+
+// ---------------------------------------------------------------- concierge
+
+async fn user_ws(srv: &Srv, email: &str, password: &str) -> RunnerWs {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let res = reqwest::Client::new()
+        .post(format!("{}/auth/login", srv.base))
+        .json(&json!({"email": email, "password": password}))
+        .send()
+        .await
+        .unwrap();
+    let cookie = res.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let url = srv.base.replace("http://", "ws://") + "/ws";
+    let mut req = url.as_str().into_client_request().unwrap();
+    req.headers_mut().insert("cookie", cookie.parse().unwrap());
+    tokio_tungstenite::connect_async(req).await.unwrap().0
+}
+
+/// Wait for a frame of `type`, or None after `secs`.
+async fn ws_find(ws: &mut RunnerWs, ty: &str, secs: u64) -> Option<Value> {
+    use tokio_tungstenite::tungstenite::Message;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(left, ws.next()).await {
+            Ok(Some(Ok(Message::Text(t)))) => {
+                let v: Value = serde_json::from_str(t.as_str()).unwrap();
+                if v["type"] == ty {
+                    return Some(v);
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            _ => return None,
+        }
+    }
+}
+
+#[tokio::test]
+async fn concierge_plans_for_the_asker_and_executes_with_their_rights() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let tab = snap.tabs[0].id;
+    let concierge = agent(&snap, "Concierge").id;
+    srv.runner.script.lock().unwrap().plan = Some(json!({
+        "reply": "Sure! Here's the plan.",
+        "actions": [
+            {"label": "Create ticket \"Fix login\"", "action": {"action": "create_ticket",
+                "ticket": {"tab_id": tab, "title": "Fix login", "body": null, "tags": ["bug"], "priority": "high",
+                           "color": null, "repo_id": null, "column_id": null}}},
+            {"label": "Hire a designer", "action": {"action": "create_agent", "agent": {"name": "Designer",
+                "role": "Design", "sprite": "pinky_boba", "color": null, "tagline": null, "system_prompt": "",
+                "skill_ids": [], "model": null, "permission_mode": null, "allowed_tools": null, "max_turns": null,
+                "connector_ids": null, "board_tools": null}}},
+            {"label": "nonsense", "action": {"action": "launch_rockets"}}
+        ],
+        "question": null
+    }));
+    let mut member_ws = user_ws(&srv, "m@test.io", "password123").await;
+    let mut owner_ws = user_ws(&srv, "owner@test.io", "correct horse").await;
+
+    let (s, run) = srv
+        .post(
+            &member,
+            "/command",
+            json!({"text": "file a ticket for the login bug and hire a designer",
+            "tab_id": tab, "ticket_id": null, "agent_id": null, "voice": true}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{run}");
+    assert_eq!(
+        (run["kind"].clone(), run["agent_id"].clone()),
+        (json!("command"), json!(concierge))
+    );
+
+    // The plan reaches the asker only, with permissions marked for them.
+    let plan = ws_find(&mut member_ws, "command_plan", 10)
+        .await
+        .expect("plan for the asker")["plan"]
+        .clone();
+    assert_eq!(plan["reply"], "Sure! Here's the plan.");
+    let actions = plan["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 2, "unknown actions are dropped");
+    assert_eq!(
+        (
+            actions[0]["allowed"].clone(),
+            actions[0]["required"].clone()
+        ),
+        (json!(true), json!("edit_tickets"))
+    );
+    assert_eq!(
+        (
+            actions[1]["allowed"].clone(),
+            actions[1]["required"].clone()
+        ),
+        (json!(false), json!("manage_agents"))
+    );
+    assert!(
+        ws_find(&mut owner_ws, "command_plan", 1).await.is_none(),
+        "someone else's plan leaked"
+    );
+
+    // The run was read-only and carried the digest + context.
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.kind == RunKind::Command)
+        .unwrap();
+    assert_eq!(spec.agent.permission_mode, PermissionMode::Plan);
+    let cmd = spec.command.unwrap();
+    assert!(cmd.voice && cmd.user_name == "m@test.io" && cmd.tab_id == Some(tab));
+    assert!(cmd.board_digest["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|a| a["name"] == "Pinky SEO"));
+    assert!(spec.ticket.is_none() && spec.mcp_servers.is_empty());
+
+    // Execute: the member's own rights apply, the plan runs once, only for its owner.
+    let run_id = run["id"].clone();
+    let exec = json!({"run_id": run_id, "actions": [actions[0]["action"], actions[1]["action"]]});
+    assert_eq!(
+        srv.post(&owner, "/command/execute", exec.clone()).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (s, results) = srv.post(&member, "/command/execute", exec.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{results}");
+    assert_eq!(results[0]["ok"], true);
+    assert_eq!(results[0]["entity"]["entity"], "ticket");
+    assert_eq!(results[1]["ok"], false);
+    assert_eq!(
+        srv.post(&member, "/command/execute", exec).await.0,
+        StatusCode::CONFLICT
+    );
+    let snap = srv.snapshot(&owner).await;
+    assert!(snap
+        .tickets
+        .iter()
+        .any(|t| t.title == "Fix login" && t.priority == Priority::High));
+    assert!(!snap.agents.iter().any(|a| a.name == "Designer"));
+    let kinds: Vec<String> = snap
+        .history
+        .iter()
+        .map(|e| boba_server::db::enc(&e.kind))
+        .collect();
+    assert!(
+        kinds.contains(&"command_issued".to_string())
+            && kinds.contains(&"command_executed".to_string())
+    );
+
+    // The Concierge is built in.
+    assert_eq!(
+        srv.req(&owner, "DELETE", &format!("/agents/{concierge}"), None)
+            .await
+            .0,
+        StatusCode::CONFLICT
     );
 }

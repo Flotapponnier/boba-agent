@@ -489,8 +489,13 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         .ok_or_else(|| AppError::conflict("the runner of this run is gone"))?
         .simulated();
 
-    // What the run is about: a ticket, or a job (quest).
+    // What the run is about: a command, a job (quest) or a ticket.
+    let command_spec = match run.kind {
+        RunKind::Command => Some(crate::concierge::spec(state, run).await?),
+        _ => None,
+    };
     let (ticket_spec, job_spec, repo) = match run.job_id {
+        _ if command_spec.is_some() => (None, None, None),
         Some(job_id) => {
             let job = db.job(job_id).await?.ok_or(AppError::NotFound("job"))?;
             let repo = crate::jobs::job_repo(state, &job, simulated).await?;
@@ -590,7 +595,7 @@ async fn build_spec(state: &SharedState, run: &Run) -> AppResult<RunSpec> {
         },
         ticket: ticket_spec,
         job: job_spec,
-        command: None,
+        command: command_spec,
         repo,
         mcp_servers,
         board_tools,
@@ -1247,6 +1252,9 @@ async fn finish_inner(
     } else if let Some(a) = agent.as_mut() {
         if run.job_id.is_some() {
             crate::jobs::on_job_run_finished_locked(state, &run, a).await?;
+        }
+        if run.kind == RunKind::Command {
+            crate::concierge::on_command_finished_locked(state, &run, outcome.plan.clone()).await?;
         }
         save_agent(state, a).await?;
     }
