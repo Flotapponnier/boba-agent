@@ -154,6 +154,8 @@ pub async fn spec(state: &SharedState, run: &Run) -> AppResult<boba_core::runner
     Ok(boba_core::runner::CommandSpec {
         text: row.text,
         voice: row.voice,
+        // Persisted with the command row by the server workstream (follow-up).
+        timezone: None,
         user_name,
         tab_id: row.tab_id,
         ticket_id: row.ticket_id,

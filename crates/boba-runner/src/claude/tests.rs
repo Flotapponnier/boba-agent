@@ -397,6 +397,7 @@ async fn command_runs_have_no_tools_and_return_a_plan() {
     s.command = Some(CommandSpec {
         text: "run the weekly audit".into(),
         voice: false,
+        timezone: None,
         user_name: "Florent".into(),
         tab_id: None,
         ticket_id: None,

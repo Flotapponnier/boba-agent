@@ -500,6 +500,7 @@ async fn command_runs_return_a_plan() {
     s.command = Some(CommandSpec {
         text: "create an agent named Mochi to review PRs".into(),
         voice: true,
+        timezone: None,
         user_name: "Florent".into(),
         tab_id: None,
         ticket_id: None,

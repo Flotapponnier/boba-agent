@@ -13,4 +13,8 @@ tab_id: string | null, ticket_id: string | null, agent_id: string | null,
 /**
  * True when the text came from voice (the concierge tolerates transcription errors).
  */
-voice: boolean, };
+voice: boolean, 
+/**
+ * Speaker's IANA timezone (browser `Intl…timeZone`) so "at 9" means 9 for them.
+ */
+timezone?: string, };

@@ -79,6 +79,9 @@ pub struct TicketSpec {
 pub struct CommandSpec {
     pub text: String,
     pub voice: bool,
+    /// Speaker's IANA timezone, for schedules ("every Monday at 9").
+    #[serde(default)]
+    pub timezone: Option<String>,
     pub user_name: String,
     /// UI context so "this" / "here" resolve.
     pub tab_id: Option<Id>,
