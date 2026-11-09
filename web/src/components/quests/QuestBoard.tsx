@@ -9,6 +9,7 @@ import { fxBus, toast } from '../../store/bus';
 import { isActive, useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
+import { UNAVAILABLE, useAvailable } from '../../store/features';
 import { Markdown } from '../ui/Markdown';
 import { Drawer } from '../ui/Overlay';
 import { Sprite } from '../ui/Sprite';
@@ -55,6 +56,7 @@ const QuestCard = memo(function QuestCard({ job: j, now }: { job: Job; now: numb
   const show = useUi((u) => u.show);
   const canManage = useCan('manage_automations');
   const canRun = useCan('run_agents');
+  const avail = useAvailable('jobs');
   const running = isActive(run);
   const out = OUTPUT_LABEL[j.output];
   return (
@@ -112,7 +114,7 @@ const QuestCard = memo(function QuestCard({ job: j, now }: { job: Job; now: numb
           </button>
         )}
         {canRun && (
-          <button className="btn gold sm" disabled={running || agent?.status !== 'idle'} title={agent?.status !== 'idle' ? `${agent?.name ?? 'The agent'} is busy` : 'Run now'} onClick={() => void runQuest(j)}>
+          <button className="btn gold sm" disabled={!avail || running || agent?.status !== 'idle'} title={!avail ? UNAVAILABLE : agent?.status !== 'idle' ? `${agent?.name ?? 'The agent'} is busy` : 'Run now'} onClick={() => void runQuest(j)}>
             ▶ Run
           </button>
         )}
@@ -129,6 +131,11 @@ export function QuestBoard() {
   const jobs = useBoard((s) => s.jobs);
   const show = useUi((u) => u.show);
   const canManage = useCan('manage_automations');
+  const avail = useAvailable('jobs');
+  // Cheap probe so an older server shows a friendly state instead of failing on the first click.
+  useEffect(() => {
+    api.previewSchedule({ type: 'manual' }).catch(() => {});
+  }, []);
   const now = useNow();
   const list = useMemo(() => Object.values(jobs).sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.next_run_at ?? 'z').localeCompare(b.next_run_at ?? 'z')), [jobs]);
   return (
@@ -141,16 +148,21 @@ export function QuestBoard() {
           <p className="page-sub">Recurring missions for your bobas: audits, triage, reports. They run on schedule, even while you sleep.</p>
         </div>
         {canManage && (
-          <button className="btn gold" onClick={() => show({ kind: 'quest-new' })}>
+          <button className="btn gold" disabled={!avail} title={avail ? undefined : UNAVAILABLE} onClick={() => show({ kind: 'quest-new' })}>
             + Post a quest
           </button>
         )}
       </div>
+      {!avail && (
+        <div className="sheet soon">
+          🚧 The quest board is coming with the next server update. Scheduled quests will show up here.
+        </div>
+      )}
       <div className="cork">
         {list.map((j) => (
           <QuestCard key={j.id} job={j} now={now} />
         ))}
-        {list.length === 0 && (
+        {list.length === 0 && avail && (
           <div className="sheet empty-state" style={{ gridColumn: '1 / -1' }}>
             <p>No quest yet. Post one: “Every Monday at 9, Pinky audits Search Console and files tickets.”</p>
           </div>

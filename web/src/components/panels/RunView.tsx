@@ -3,7 +3,8 @@ import { api } from '../../api/client';
 import { connection } from '../../api/connection';
 import type { Run, RunLogLine } from '../../api/types';
 import { compact, duration, usd } from '../../lib/format';
-import { answerPermission, cancelRun, messageRun } from '../../store/actions';
+import { answerPermission, cancelRun, messageRun, updateAgent } from '../../store/actions';
+import { commandPattern } from '../../lib/game';
 import { isActive, useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { Markdown } from '../ui/Markdown';
@@ -117,6 +118,10 @@ const ToolCard = memo(function ToolCard({ use, result, defaultOpen }: { use: Run
 function PermissionCard({ line, resolved, run }: { line: RunLogLine; resolved?: { allow: boolean; user_id?: string }; run: Run }) {
   const p = obj(obj(line.data).permission_request);
   const canRun = useCan('run_agents');
+  const canAgents = useCan('manage_agents');
+  const agent = useBoard((s) => s.agents[run.agent_id]);
+  const input = obj(p.input);
+  const pattern = str(p.tool) === 'Bash' ? commandPattern(str(input.command)) : null;
   const who = useBoard((s) => (resolved?.user_id ? s.users[resolved.user_id]?.name : undefined));
   const [busy, setBusy] = useState(false);
   const answer = async (allow: boolean) => {
@@ -138,6 +143,21 @@ function PermissionCard({ line, resolved, run }: { line: RunLogLine; resolved?: 
           <button className="btn red sm" disabled={busy} onClick={() => void answer(false)}>
             Deny
           </button>
+          {pattern && canAgents && agent && !agent.allowed_tools.includes(pattern) && (
+            <button
+              className="btn gold sm"
+              disabled={busy}
+              title={`Adds ${pattern} to ${agent.name}'s allowed tools, then allows this call`}
+              onClick={async () => {
+                setBusy(true);
+                await updateAgent(agent.id, { allowed_tools: [...agent.allowed_tools, pattern] });
+                await answerPermission(run.id, str(p.request_id), true);
+                setBusy(false);
+              }}
+            >
+              Always allow <code>{pattern.slice(5, -3)}</code> for {agent.name}
+            </button>
+          )}
         </div>
       ) : (
         <span className="muted">Waiting for someone with the Run agents permission…</span>
@@ -174,6 +194,20 @@ function UserLine({ line }: { line: RunLogLine }) {
       {name && <small>{name}</small>}
       {line.text}
     </div>
+  );
+}
+
+/** A subscription runner doesn't charge per token: show the list-price equivalent instead of a cost. */
+function CostLabel({ run }: { run: Run }) {
+  const sub = useBoard((s) => (run.runner_id ? s.runners[run.runner_id]?.auth === 'subscription' : false));
+  return sub ? (
+    <span title="This run used a Claude subscription: nothing is charged per token">
+      💰 <b>≈ {usd(run.cost_usd)}</b> list-price equivalent (included in subscription)
+    </span>
+  ) : (
+    <span>
+      💰 <b>{usd(run.cost_usd)}</b>
+    </span>
   );
 }
 
@@ -364,9 +398,7 @@ export function RunView({
           <span>
             ⏱ <b>{duration(run.started_at ?? run.created_at, run.ended_at, now)}</b>
           </span>
-          <span>
-            💰 <b>{usd(run.cost_usd)}</b>
-          </span>
+          <CostLabel run={run} />
           <span>
             ⇣ <b>{compact(run.input_tokens)}</b> ⇡ <b>{compact(run.output_tokens)}</b> tokens
           </span>

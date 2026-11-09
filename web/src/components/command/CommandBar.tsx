@@ -12,6 +12,7 @@ import { usePrefs } from '../../store/prefs';
 import { useAgentsList, useTabs } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi, type Modal, type View } from '../../store/ui';
+import { UNAVAILABLE, useAvailable, useFeatures } from '../../store/features';
 
 type Phase =
   | { k: 'input' }
@@ -214,6 +215,7 @@ export function CommandBar() {
   const setCommand = useUi((u) => u.setCommand);
   const speech = useBoard((s) => s.settings?.speech);
   const quick = useQuickActions();
+  const conciergeOk = useAvailable('command');
   const [phase, setPhase] = useState<Phase>({ k: 'input' });
   const [text, setText] = useState('');
   const [sel, setSel] = useState(0);
@@ -282,6 +284,11 @@ export function CommandBar() {
   );
 
   const beginVoice = useCallback(async () => {
+    if (useFeatures.getState().missing.command) {
+      setCommand({ open: true });
+      setVoiceErr(`The Concierge (voice and plain-English commands) is ${UNAVAILABLE.toLowerCase()}. You can still jump anywhere from here.`);
+      return;
+    }
     const sup = voiceSupport(speech);
     setCommand({ open: true });
     if (!sup.ok) {
@@ -386,7 +393,7 @@ export function CommandBar() {
     if (!q) return quick.slice(0, 7);
     return quick.filter((x) => x.label.toLowerCase().includes(q)).slice(0, 6);
   }, [quick, text]);
-  const items = text.trim() ? [{ id: 'ask', label: `Ask the Concierge: “${text.trim()}”`, hint: 'Enter', run: () => void send(text, viaVoice.current) }, ...matches] : matches;
+  const items = text.trim() && conciergeOk ? [{ id: 'ask', label: `Ask the Concierge: “${text.trim()}”`, hint: 'Enter', run: () => void send(text, viaVoice.current) }, ...matches] : matches;
 
   const execute = async (plan: CommandPlan, only?: number[]) => {
     const idx = only ?? plan.actions.map((_, i) => i).filter((i) => checked[i] && plan.actions[i]?.allowed);
@@ -505,7 +512,10 @@ export function CommandBar() {
                     </button>
                   </li>
                 ))}
-                {!text && (
+                {!conciergeOk && (
+                  <li className="cmd-tip hint-text">🚧 The Concierge is {UNAVAILABLE.toLowerCase()}: quick navigation only.</li>
+                )}
+                {!text && conciergeOk && (
                   <li className="cmd-tip hint-text">
                     Try: “every Monday at 9, Pinky audits Search Console and files tickets” · “send Boba Dev on T-3” · “sync the app repo”
                   </li>

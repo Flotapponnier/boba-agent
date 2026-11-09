@@ -1,4 +1,5 @@
 import type { ClientMessage, ServerMessage } from './types';
+import { featureOf, useFeatures } from '../store/features';
 
 export class ApiFailure extends Error {
   readonly status: number;
@@ -57,6 +58,12 @@ export const httpTransport: Transport = {
     }
     if (!res.ok) {
       const e = json as { error?: string; code?: string } | undefined;
+      // A route the server doesn't have yet: degrade instead of erroring everywhere.
+      if (res.status === 501 || res.status === 405 || (res.status === 404 && (!e?.error || /no such endpoint/i.test(e.error)))) {
+        const f = featureOf(path);
+        if (f) useFeatures.getState().markMissing(f);
+        throw new ApiFailure(res.status, 'This feature is not available on this server yet.', 'unavailable');
+      }
       throw new ApiFailure(res.status, e?.error ?? (text || res.statusText), e?.code);
     }
     return json as T;

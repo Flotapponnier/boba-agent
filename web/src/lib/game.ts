@@ -83,6 +83,23 @@ export const MODELS: { id: string | null; label: string }[] = [
   { id: 'claude-fable-5-1', label: 'Fable 5.1' },
 ];
 
+/** One-click `--allowedTools` presets so test/build commands don't stop on a permission prompt. */
+export const COMMAND_PRESETS: { stack: string; icon: string; tools: string[] }[] = [
+  { stack: 'Rust', icon: '🦀', tools: ['Bash(cargo test:*)', 'Bash(cargo build:*)', 'Bash(cargo clippy:*)', 'Bash(cargo fmt:*)'] },
+  { stack: 'Node', icon: '🟩', tools: ['Bash(pnpm test:*)', 'Bash(pnpm lint:*)', 'Bash(pnpm build:*)', 'Bash(pnpm typecheck:*)', 'Bash(npm test:*)', 'Bash(npx vitest:*)'] },
+  { stack: 'Python', icon: '🐍', tools: ['Bash(python3 -m pytest:*)', 'Bash(pytest:*)', 'Bash(ruff check:*)', 'Bash(mypy:*)'] },
+  { stack: 'Go', icon: '🐹', tools: ['Bash(go test:*)', 'Bash(go build:*)', 'Bash(go vet:*)'] },
+  { stack: 'Git (read)', icon: '🌿', tools: ['Bash(git diff:*)', 'Bash(git status:*)', 'Bash(git log:*)'] },
+];
+
+/** `cargo test --all` → `Bash(cargo test:*)` (first two words, or one for single-word commands). */
+export function commandPattern(command: string): string | null {
+  const words = command.trim().split(/\s+/).filter((w) => !/^[A-Z_]+=/.test(w));
+  if (!words.length || /[;&|`$<>]/.test(words.slice(0, 2).join(' '))) return null;
+  const head = words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : words[0];
+  return `Bash(${head}:*)`;
+}
+
 export const SWATCHES = ['#f39c12', '#e74c3c', '#ff6fb5', '#9b59b6', '#3498db', '#1abc9c', '#2ecc71', '#ffd23f', '#8b4513', '#34495e'];
 
 /** Stable pseudo-random rotation in [-2, 2] degrees for a ticket "paper". */
