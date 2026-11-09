@@ -10,6 +10,7 @@ import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { UNAVAILABLE, useAvailable } from '../../store/features';
 import { GithubCard } from './GithubCard';
+import { Icon } from '../ui/Icon';
 
 function Toggle({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }) {
   return (
@@ -69,7 +70,7 @@ const RepoCard = memo(function RepoCard({ repo }: { repo: Repo }) {
     <article className={`repo-card sheet ${sync.enabled ? 'on' : ''}`}>
       <header className="row">
         <span className="repo-ico" aria-hidden="true">
-          🐙
+          <Icon name="repo" size={24} />
         </span>
         <div className="grow">
           <h3>{repo.name}</h3>
@@ -83,7 +84,7 @@ const RepoCard = memo(function RepoCard({ repo }: { repo: Repo }) {
         <span>Last sync: {repo.sync.last_synced_at ? timeAgo(repo.sync.last_synced_at) : 'never'}</span>
         <span>· {imported} imported ticket{imported === 1 ? '' : 's'} on the board</span>
       </div>
-      {repo.sync.last_error && <p className="form-error">⚠ {repo.sync.last_error}</p>}
+      {repo.sync.last_error && <p className="form-error">{repo.sync.last_error}</p>}
 
       <fieldset disabled={ro} className="sync-grid">
         <Toggle checked={sync.enabled} onChange={(v) => set('enabled', v)} label="Sync with GitHub" hint={`Polls every ${sync.poll_minutes} min (and on webhooks if configured)`} />
@@ -93,7 +94,7 @@ const RepoCard = memo(function RepoCard({ repo }: { repo: Repo }) {
             <option value="">Pick a tab…</option>
             {tabs.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.icon} {t.name}
+                {t.name}
               </option>
             ))}
           </select>
@@ -170,7 +171,7 @@ export function Integrations() {
       <div className="page-head">
         <div>
           <div className="sign" style={{ textAlign: 'left' }}>
-            🔗 INTEGRATIONS
+            <Icon name="repo" size={24} /> INTEGRATIONS
           </div>
           <p className="page-sub">Connect repositories: GitHub issues become tickets, outside PRs go straight to your reviewer, and results flow back to GitHub.</p>
         </div>

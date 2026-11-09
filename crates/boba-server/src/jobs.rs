@@ -115,7 +115,7 @@ pub async fn create(
         icon: req
             .icon
             .filter(|i| !i.trim().is_empty())
-            .unwrap_or_else(|| "📜".into()),
+            .unwrap_or_else(|| "quest".into()),
         agent_id: req.agent_id,
         prompt: req.prompt.trim().to_string(),
         schedule: req.schedule,

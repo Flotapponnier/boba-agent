@@ -11,6 +11,7 @@ import { useUi } from '../../store/ui';
 import { Modal } from '../ui/Overlay';
 import { UNAVAILABLE, useAvailable } from '../../store/features';
 import { Sprite } from '../ui/Sprite';
+import { Glyph, Icon } from '../ui/Icon';
 
 const PortalCard = memo(function PortalCard({ c }: { c: Connector }) {
   const p = preset(c.kind);
@@ -30,8 +31,8 @@ const PortalCard = memo(function PortalCard({ c }: { c: Connector }) {
   };
   return (
     <article className="portal sheet" style={{ '--pc': p.color } as CSSProperties}>
-      <div className="portal-ring" aria-hidden="true">
-        <span>{p.icon}</span>
+      <div className="portal-tile" aria-hidden="true">
+        <Glyph value={p.icon} size={30} />
       </div>
       <div className="portal-body">
         <h3>{c.name}</h3>
@@ -40,7 +41,7 @@ const PortalCard = memo(function PortalCard({ c }: { c: Connector }) {
         <div className="chips" style={{ marginTop: 4 }}>
           {c.secret_keys.map((k) => (
             <span key={k} className="chip" title="Stored encrypted. Values are never shown again.">
-              🔒 {k}
+              <Icon name="lock" size={12} /> {k}
             </span>
           ))}
           {c.secret_keys.length === 0 && <span className="hint-text">No secret</span>}
@@ -58,7 +59,7 @@ const PortalCard = memo(function PortalCard({ c }: { c: Connector }) {
           <div className={`portal-test ${test.ok ? 'ok' : 'bad'}`} role="status">
             {test.ok ? (
               <>
-                ✓ Portal open · {test.tools.length} tool{test.tools.length === 1 ? '' : 's'}
+                <Icon name="check" size={12} /> Portal open · {test.tools.length} tool{test.tools.length === 1 ? '' : 's'}
                 <div className="chips" style={{ marginTop: 4 }}>
                   {test.tools.map((t) => (
                     <code key={t}>{t}</code>
@@ -66,17 +67,17 @@ const PortalCard = memo(function PortalCard({ c }: { c: Connector }) {
                 </div>
               </>
             ) : (
-              <>✗ {test.error}</>
+              <>{test.error}</>
             )}
           </div>
         )}
         {canManage && (
           <div className="row end" style={{ marginTop: 8 }}>
             <button className="btn sm" disabled={testing} onClick={() => void run()}>
-              {testing ? 'Opening…' : '⚡ Test'}
+              {testing ? 'Opening…' : 'Test'}
             </button>
             <button className="btn sm" onClick={() => show({ kind: 'portal-edit', id: c.id })}>
-              ✎ Edit
+              <Icon name="edit" size={12} /> Edit
             </button>
           </div>
         )}
@@ -96,7 +97,7 @@ export function Portals() {
       <div className="page-head">
         <div>
           <div className="sign" style={{ textAlign: 'left' }}>
-            🌀 PORTALS
+            <Icon name="portal" size={24} /> PORTALS
           </div>
           <p className="page-sub">Portals are MCP connectors that open tools to your bobas: Search Console, Sentry, Linear, Slack… Give them to an agent in its persona.</p>
         </div>
@@ -114,7 +115,9 @@ export function Portals() {
           <div className="preset-grid">
             {PRESETS.map((p) => (
               <button key={p.kind} className="preset" disabled={!avail} title={avail ? undefined : UNAVAILABLE} style={{ '--pc': p.color } as CSSProperties} onClick={() => show({ kind: 'portal-new', preset: p.kind })}>
-                <span className="preset-ico">{p.icon}</span>
+                <span className="preset-ico">
+                  <Glyph value={p.icon} size={22} />
+                </span>
                 <b>{p.name}</b>
                 <small>{p.blurb}</small>
               </button>
@@ -163,7 +166,7 @@ export function PortalEditor({ connectorId, presetKind }: { connectorId?: string
     if (c) {
       useBoard.getState().upsert({ entity: 'connector', data: c });
       sfx('done', 0.6);
-      toast(existing ? `${c.name} updated` : `Portal ${c.name} is open! 🌀`, 'gold');
+      toast(existing ? `${c.name} updated` : `Portal ${c.name} is open`, 'gold');
       close();
     }
   };
@@ -172,7 +175,7 @@ export function PortalEditor({ connectorId, presetKind }: { connectorId?: string
     <Modal title={existing ? `EDIT ${existing.name.toUpperCase()}` : `OPEN ${p.name.toUpperCase()}`} onClose={close} wide>
       <div className="row" style={{ marginBottom: 10 }}>
         <span className="preset-ico" style={{ '--pc': p.color } as CSSProperties}>
-          {p.icon}
+          <Glyph value={p.icon} size={22} />
         </span>
         <p className="hint-text grow">{p.blurb}</p>
       </div>
@@ -247,7 +250,7 @@ export function PortalEditor({ connectorId, presetKind }: { connectorId?: string
             aria-label={`Value of ${s.key}`}
           />
           <button type="button" className="icon-btn" style={{ background: 'var(--red)' }} aria-label={`Remove ${s.key}`} onClick={() => setSecrets((xs) => (s.stored ? xs.map((x, j) => (j === i ? { ...x, remove: !x.remove, value: '' } : x)) : xs.filter((_, j) => j !== i)))}>
-            {s.remove ? '↺' : '✕'}
+            <Icon name={s.remove ? 'undo' : 'close'} size={14} />
           </button>
         </div>
       ))}
@@ -281,7 +284,7 @@ export function PortalEditor({ connectorId, presetKind }: { connectorId?: string
             Cancel
           </button>
           <button className="btn gold" disabled={busy || !name.trim()} onClick={() => void save()}>
-            {existing ? 'Save' : '🌀 Open portal'}
+            {existing ? 'Save' : 'Open portal'}
           </button>
         </div>
       </div>

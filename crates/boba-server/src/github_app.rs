@@ -392,7 +392,7 @@ pub async fn setup(
 <style>body{{font-family:system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#3b2a1a}}\
 button{{font-size:1rem;padding:.7rem 1.2rem;border-radius:.6rem;border:0;background:#c98b5a;color:#fff;cursor:pointer}}\
 .warn{{background:#fff3cd;padding:.6rem;border-radius:.4rem}}</style></head><body>\
-<h1>🧋 Connect GitHub</h1><p>This creates a private GitHub App named <b>{}</b> for this Boba Agent server. \
+<h1>Connect GitHub</h1><p>This creates a private GitHub App named <b>{}</b> for this Boba Agent server. \
 GitHub will ask you to confirm, then to pick the repositories it may access.</p>{warning}\
 <form id=\"f\" method=\"post\" action=\"{}\"><input type=\"hidden\" name=\"manifest\" value=\"{}\">\
 <button type=\"submit\">Create the GitHub App</button></form></body></html>",

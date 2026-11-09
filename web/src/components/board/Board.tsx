@@ -7,6 +7,7 @@ import { sortedColumns, useActiveRuns, useCan, useTicketsByColumn } from '../../
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { stageColor, TicketCard } from './TicketCard';
+import { Glyph, Icon } from '../ui/Icon';
 
 const EMPTY: Record<Column['kind'], string> = {
   backlog: 'Ideas go here.',
@@ -81,18 +82,18 @@ export function Board({ tabId, dragCols, draggingTicket, canEdit }: { tabId: str
     <section className="board-wrap wood" aria-label={`${tab.name} board`}>
       <div className="board-tools">
         <span className="sign" style={{ textAlign: 'left' }}>
-          {tab.icon} {tab.name.toUpperCase()}
+          <Glyph value={tab.icon} size={20} /> {tab.name.toUpperCase()}
         </span>
         {repo && (
           <span className="chip" title={repo.path}>
-            ⎇ {repo.name}
+            <Icon name="repo" size={12} /> {repo.name}
           </span>
         )}
         <span className="grow" />
         <input className="search" type="search" placeholder="Filter tickets…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter tickets" />
         {canManage && (
           <button className="btn sm" onClick={() => show({ kind: 'tab-edit', id: tab.id })}>
-            ⚙ Columns
+            <Icon name="sliders" size={14} /> Columns
           </button>
         )}
       </div>

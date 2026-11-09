@@ -15,6 +15,7 @@ import { RunView, STATUS_LABEL } from './RunView';
 import type { CommentAnchor } from '../../api/types';
 import { Discussion } from '../comments/Comments';
 import { QuotableBody } from '../comments/QuotableBody';
+import { Icon } from '../ui/Icon';
 
 type View = 'live' | 'details' | 'history' | 'discussion';
 
@@ -156,7 +157,7 @@ function Details({ t, onQuote }: { t: Ticket; onQuote: (q: string) => void }) {
                 <dt>PULL REQUEST</dt>
                 <dd>
                   <a href={t.pr_url} target="_blank" rel="noreferrer noopener">
-                    #{t.pr_number} ↗
+                    #{t.pr_number} <Icon name="external" size={12} />
                   </a>
                 </dd>
               </>
@@ -183,7 +184,7 @@ function Details({ t, onQuote }: { t: Ticket; onQuote: (q: string) => void }) {
           {canEdit && (
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn sm" onClick={() => setEditing(true)}>
-                ✏ Edit
+                <Icon name="edit" size={14} /> Edit
               </button>
               <button
                 className="btn sm red"
@@ -191,7 +192,7 @@ function Details({ t, onQuote }: { t: Ticket; onQuote: (q: string) => void }) {
                   if (confirm(`Delete T-${t.number}? This cancels its run.`)) void deleteTicket(t);
                 }}
               >
-                🗑 Delete
+                <Icon name="trash" size={14} /> Delete
               </button>
             </div>
           )}
@@ -306,7 +307,7 @@ export function TicketPanel({ ticketId, initialView, commentId, runId }: { ticke
       <div className="panel-tabs" role="tablist">
         {(['live', 'discussion', 'details', 'history'] as View[]).map((v) => (
           <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)}>
-            {v === 'live' ? (activeRun ? '● LIVE' : `RUNS (${runs.length})`) : v === 'details' ? 'DETAILS' : v === 'discussion' ? `💬 TALK${threadCount ? ` (${threadCount})` : ''}` : 'HISTORY'}
+            {v === 'live' ? (activeRun ? '● LIVE' : `RUNS (${runs.length})`) : v === 'details' ? 'DETAILS' : v === 'discussion' ? `TALK${threadCount ? ` (${threadCount})` : ''}` : 'HISTORY'}
           </button>
         ))}
       </div>
@@ -321,7 +322,8 @@ export function TicketPanel({ ticketId, initialView, commentId, runId }: { ticke
                 <div className="round-picker" aria-label="Rounds">
                   {ordered.map((r, i) => (
                     <button key={r.id} aria-pressed={r.id === run.id} onClick={() => setSelected(r.id)} title={`${agents[r.agent_id]?.name ?? ''} · ${STATUS_LABEL[r.status]}`}>
-                      #{i + 1} {r.kind === 'review' ? '🔍' : '🛠'} {r.verdict === 'approved' ? '✓' : r.verdict === 'changes_requested' ? '↺' : r.status === 'failed' ? '✗' : isActive(r) ? '●' : ''}
+                      #{i + 1} <Icon name={r.kind === 'review' ? 'search' : 'tools'} size={12} />{' '}
+                      {r.verdict === 'approved' ? <Icon name="check" size={12} /> : r.verdict === 'changes_requested' ? <Icon name="refresh" size={12} /> : r.status === 'failed' ? <Icon name="close" size={12} /> : isActive(r) ? '●' : ''}
                     </button>
                   ))}
                 </div>

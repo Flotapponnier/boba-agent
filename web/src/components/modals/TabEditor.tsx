@@ -6,9 +6,12 @@ import { sortedColumns, useAgentsList, useTabs } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { Modal } from '../ui/Overlay';
+import { Icon } from '../ui/Icon';
+import { glyphKey } from '../../lib/glyph';
+import type { IconName } from '../../lib/icons';
 
 const KINDS: ColumnKind[] = ['backlog', 'todo', 'doing', 'review', 'done', 'custom'];
-const ICONS = ['🧋', '🔎', '🛠️', '🎨', '🧪', '📣', '📈', '🐛', '🚀', '📚', '🔒', '🌍'];
+const ICONS: IconName[] = ['boba', 'search', 'tools', 'palette', 'beaker', 'megaphone', 'chart', 'bug', 'speed', 'book', 'lock', 'globe', 'shield', 'server', 'mail', 'code'];
 
 type Spec = ColumnSpec & { key: string };
 
@@ -47,7 +50,7 @@ export function TabEditor({ tabId }: { tabId?: string }) {
   const reviewer = agents.find((a) => a.role.toLowerCase() === 'reviewer')?.id ?? null;
   const [f, setF] = useState(() => ({
     name: tab?.name ?? '',
-    icon: tab?.icon ?? '🧋',
+    icon: glyphKey(tab?.icon) ?? 'boba',
     color: tab?.color ?? '#f39c12',
     repo_id: tab?.repo_id ?? '',
   }));
@@ -106,11 +109,10 @@ export function TabEditor({ tabId }: { tabId?: string }) {
         <span className="label">Icon & colour</span>
         <div className="swatches">
           {ICONS.map((i) => (
-            <button key={i} type="button" className="swatch" style={{ background: f.icon === i ? '#fff3c4' : 'var(--paper-2)', fontSize: 15, display: 'grid', placeItems: 'center' }} aria-pressed={f.icon === i} onClick={() => setF({ ...f, icon: i })}>
-              {i}
+            <button key={i} type="button" className="swatch" style={{ background: f.icon === i ? '#fff3c4' : 'var(--paper-2)', display: 'grid', placeItems: 'center' }} aria-pressed={f.icon === i} aria-label={`Icon ${i}`} onClick={() => setF({ ...f, icon: i })}>
+              <Icon name={i} />
             </button>
           ))}
-          <input maxLength={4} value={f.icon} onChange={(e) => setF({ ...f, icon: e.target.value })} style={{ width: 60 }} aria-label="Custom icon" />
         </div>
         <div className="swatches">
           {SWATCHES.map((c) => (
@@ -162,7 +164,7 @@ export function TabEditor({ tabId }: { tabId?: string }) {
             title={count(c.id) ? `${count(c.id)} ticket(s) will move to the first To do column` : 'Remove'}
             onClick={() => setCols((cs) => cs.filter((_, j) => j !== i))}
           >
-            ✕
+            <Icon name="close" size={14} />
           </button>
           {c.kind === 'review' && (
             <div className="review-opts">

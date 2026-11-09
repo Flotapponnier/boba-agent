@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Markdown } from '../ui/Markdown';
+import { Icon } from '../ui/Icon';
 
 type HighlightCtor = new (...ranges: Range[]) => unknown;
 const highlights = (): { set(name: string, h: unknown): void; delete(name: string): void } | null => {
@@ -84,10 +85,10 @@ export function QuotableBody({ text, quotes, onQuote, canComment }: { text: stri
             window.getSelection()?.removeAllRanges();
           }}
         >
-          💬 Comment
+          <Icon name="chat" size={12} /> Comment
         </button>
       )}
-      {quotes.length > 0 && <span className="quote-count" title="Passages with a thread are highlighted">💬 {quotes.length}</span>}
+      {quotes.length > 0 && <span className="quote-count" title="Passages with a thread are highlighted"><Icon name="chat" size={12} /> {quotes.length}</span>}
     </div>
   );
 }

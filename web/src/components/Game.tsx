@@ -111,7 +111,7 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
     }
     if (!handleGithubReturn()) return;
     ui.setView('integrations');
-    toast('Welcome back from GitHub 🐙 The app is set up: add a repo below.', 'gold');
+    toast('Welcome back from GitHub. The app is set up: add a repo below.', 'gold');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 

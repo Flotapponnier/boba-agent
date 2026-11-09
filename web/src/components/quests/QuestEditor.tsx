@@ -10,8 +10,11 @@ import { useUi } from '../../store/ui';
 import { Modal } from '../ui/Overlay';
 import { Sprite } from '../ui/Sprite';
 import { OUTPUT_LABEL } from './QuestBoard';
+import { Icon } from '../ui/Icon';
+import { glyphKey } from '../../lib/glyph';
+import type { IconName } from '../../lib/icons';
 
-const ICONS = ['📜', '🔎', '🛡️', '🚨', '📋', '📈', '🧹', '🔧', '📣', '🐛', '🌍', '⚔️'];
+const ICONS: IconName[] = ['quest', 'search', 'shield', 'siren', 'clipboard', 'chart', 'eraser', 'tools', 'megaphone', 'bug', 'globe', 'sword', 'mail', 'database', 'calendar', 'trophy'];
 const MODES: { id: Builder['mode']; label: string }[] = [
   { id: 'manual', label: 'Manual' },
   { id: 'interval', label: 'Every N min' },
@@ -143,7 +146,7 @@ function ScheduleBuilder({ value, onChange }: { value: Builder; onChange: (b: Bu
               )}
             </>
           ) : (
-            <span>⚠ {preview.error}</span>
+            <span>{preview.error}</span>
           )}
         </div>
       )}
@@ -160,7 +163,7 @@ export function QuestEditor({ jobId }: { jobId?: string }) {
   const setSpot = useUi((u) => u.setSpotlight);
   const [f, setF] = useState(() => ({
     name: existing?.name ?? '',
-    icon: existing?.icon ?? '📜',
+    icon: glyphKey(existing?.icon) ?? 'quest',
     description: existing?.description ?? '',
     agent_id: existing?.agent_id ?? agents.find((a) => a.role.toLowerCase() !== 'reviewer')?.id ?? agents[0]?.id ?? '',
     prompt: existing?.prompt ?? '',
@@ -197,7 +200,7 @@ export function QuestEditor({ jobId }: { jobId?: string }) {
     setBusy(false);
     if (j) {
       useBoard.getState().upsert({ entity: 'job', data: j });
-      toast(existing ? `Quest "${j.name}" updated` : `Quest "${j.name}" posted on the board! 📜`, 'gold', agent?.sprite);
+      toast(existing ? `Quest "${j.name}" updated` : `Quest "${j.name}" posted on the board`, 'gold', agent?.sprite);
       setSpot(j.id);
       setTimeout(() => useUi.getState().setSpotlight(null), 2500);
       close();
@@ -216,8 +219,8 @@ export function QuestEditor({ jobId }: { jobId?: string }) {
             <span className="label">Seal</span>
             <div className="swatches">
               {ICONS.map((i) => (
-                <button key={i} type="button" className="swatch" style={{ background: f.icon === i ? '#fff3c4' : 'var(--paper-2)', fontSize: 15, display: 'grid', placeItems: 'center' }} aria-pressed={f.icon === i} onClick={() => setF({ ...f, icon: i })}>
-                  {i}
+                <button key={i} type="button" className="swatch" style={{ background: f.icon === i ? '#fff3c4' : 'var(--paper-2)', display: 'grid', placeItems: 'center' }} aria-pressed={f.icon === i} aria-label={`Seal ${i}`} onClick={() => setF({ ...f, icon: i })}>
+                  <Icon name={i} />
                 </button>
               ))}
             </div>
@@ -234,7 +237,7 @@ export function QuestEditor({ jobId }: { jobId?: string }) {
               </button>
             ))}
           </div>
-          {agent && f.output === 'tickets' && !agent.board_tools && <p className="form-error">⚠ {agent.name} has no Board tools, so it can't file tickets. Turn them on in its persona.</p>}
+          {agent && f.output === 'tickets' && !agent.board_tools && <p className="form-error">{agent.name} has no Board tools, so it can't file tickets. Turn them on in its persona.</p>}
           {agent && agent.connector_ids.length === 0 && <p className="hint-text">{agent.name} has no portal (connector). It will only use the web and the repo.</p>}
         </div>
 
@@ -253,7 +256,7 @@ export function QuestEditor({ jobId }: { jobId?: string }) {
           <div className="output-pick" role="radiogroup" aria-label="Output">
             {(Object.keys(OUTPUT_LABEL) as JobOutput[]).map((o) => (
               <button type="button" key={o} role="radio" aria-checked={f.output === o} className={`out ${f.output === o ? 'on' : ''}`} onClick={() => setF({ ...f, output: o })}>
-                <span style={{ fontSize: 22 }}>{OUTPUT_LABEL[o].icon}</span>
+                <Icon name={OUTPUT_LABEL[o].icon} size={24} />
                 {OUTPUT_LABEL[o].label}
               </button>
             ))}
@@ -266,7 +269,7 @@ export function QuestEditor({ jobId }: { jobId?: string }) {
               <select value={f.tab_id} onChange={(e) => setF({ ...f, tab_id: e.target.value })}>
                 {tabs.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.icon} {t.name}
+                    {t.name}
                   </option>
                 ))}
               </select>
@@ -297,7 +300,7 @@ export function QuestEditor({ jobId }: { jobId?: string }) {
             Cancel
           </button>
           <button className="btn gold" disabled={busy || !f.name.trim() || !f.prompt.trim() || !f.agent_id || !!schedErr || needsRepo} title={schedErr ?? (needsRepo ? 'Pick a repository' : undefined)}>
-            {existing ? 'Save quest' : '📜 Post it'}
+            {existing ? 'Save quest' : 'Post it'}
           </button>
         </div>
       </form>

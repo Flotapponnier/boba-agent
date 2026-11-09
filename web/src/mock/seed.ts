@@ -168,15 +168,15 @@ export function seed(): MockState {
 
   const tabs: Tab[] = [
     {
-      id: 'tab_dev', name: 'Dev', icon: '🧋', color: '#f39c12', position: 0, repo_id: 'r_app',
+      id: 'tab_dev', name: 'Dev', icon: 'boba', color: '#f39c12', position: 0, repo_id: 'r_app',
       columns: cols('tab_dev', [['Backlog', 'backlog', '#95a5a6'], ['To do', 'todo', '#e74c3c'], ['Doing', 'doing', '#f39c12'], ['PR · Review', 'review', '#3498db'], ['Done', 'done', '#2ecc71']], 'a_uncle'),
     },
     {
-      id: 'tab_seo', name: 'SEO', icon: '🔎', color: '#ff6fb5', position: 1, repo_id: 'r_site',
+      id: 'tab_seo', name: 'SEO', icon: 'search', color: '#ff6fb5', position: 1, repo_id: 'r_site',
       columns: cols('tab_seo', [['To do', 'todo', '#e74c3c'], ['Doing', 'doing', '#f39c12'], ['Review', 'review', '#3498db'], ['Done', 'done', '#2ecc71']], 'a_uncle'),
     },
     {
-      id: 'tab_infra', name: 'Infra', icon: '🛠️', color: '#3498db', position: 2, repo_id: 'r_infra',
+      id: 'tab_infra', name: 'Infra', icon: 'tools', color: '#3498db', position: 2, repo_id: 'r_infra',
       columns: cols('tab_infra', [['To do', 'todo', '#e74c3c'], ['Doing', 'doing', '#f39c12'], ['Review', 'review', '#3498db'], ['Shipped', 'done', '#2ecc71']], 'a_uncle'),
     },
   ];
@@ -312,9 +312,9 @@ export function seed(): MockState {
     stats: { pearls: 128, runs_completed: 47, prs_approved: 18, total_cost_usd: 23.41 },
     invites: {},
     jobs: [
-      job('job_seo', 'Weekly SEO audit', '🔎', 'a_pinky', 'Check Search Console for pages that lost clicks or have indexing issues and file one ticket per fix in the SEO tab.', { type: 'cron', expr: '0 9 * * 1', timezone: 'Europe/Paris' }, 'tickets', { tab_id: 'tab_seo', runs_count: 6, last_run_at: iso(2 * D), last_result: 'Filed 2 tickets: canonical mismatch on /trade/btc-usd; missing meta description on /blog/fees-explained.' }),
-      job('job_deps', 'Nightly dependency check', '🛡️', 'a_black', 'List outdated and vulnerable dependencies of the app and summarise what to upgrade.', { type: 'cron', expr: '30 2 * * *', timezone: 'Europe/Paris' }, 'report', { repo_id: 'r_app', runs_count: 21, last_run_at: iso(18 * H), last_result: '## Nightly dependency check\n\n- 4 outdated packages (1 security advisory, moderate)\n- Recommend upgrading `undici` this week' }),
-      job('job_crash', 'Crash triage', '🚨', 'a_golden', 'Read new unresolved Sentry issues and file a ticket for each crash with more than 50 events.', { type: 'interval', minutes: 120 }, 'tickets', { tab_id: 'tab_dev', enabled: false, runs_count: 3, last_run_at: iso(3 * D), last_result: 'Filed 1 ticket: TypeError in fees.ts:88 (312 events).' }),
+      job('job_seo', 'Weekly SEO audit', 'search', 'a_pinky', 'Check Search Console for pages that lost clicks or have indexing issues and file one ticket per fix in the SEO tab.', { type: 'cron', expr: '0 9 * * 1', timezone: 'Europe/Paris' }, 'tickets', { tab_id: 'tab_seo', runs_count: 6, last_run_at: iso(2 * D), last_result: 'Filed 2 tickets: canonical mismatch on /trade/btc-usd; missing meta description on /blog/fees-explained.' }),
+      job('job_deps', 'Nightly dependency check', 'shield', 'a_black', 'List outdated and vulnerable dependencies of the app and summarise what to upgrade.', { type: 'cron', expr: '30 2 * * *', timezone: 'Europe/Paris' }, 'report', { repo_id: 'r_app', runs_count: 21, last_run_at: iso(18 * H), last_result: '## Nightly dependency check\n\n- 4 outdated packages (1 security advisory, moderate)\n- Recommend upgrading `undici` this week' }),
+      job('job_crash', 'Crash triage', 'siren', 'a_golden', 'Read new unresolved Sentry issues and file a ticket for each crash with more than 50 events.', { type: 'interval', minutes: 120 }, 'tickets', { tab_id: 'tab_dev', enabled: false, runs_count: 3, last_run_at: iso(3 * D), last_result: 'Filed 1 ticket: TypeError in fees.ts:88 (312 events).' }),
     ],
     connectors: [
       { id: 'cn_gsc', name: 'Search Console', kind: 'google_search_console', transport: { type: 'stdio', command: 'npx', args: ['-y', 'mcp-server-gsc'] }, secret_keys: ['GOOGLE_APPLICATION_CREDENTIALS_JSON'], allowed_tools: [], created_by: 'u_owner', created_at: iso(7 * D) },

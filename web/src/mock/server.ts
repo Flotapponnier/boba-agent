@@ -774,7 +774,7 @@ class MockServer implements Transport {
     const tab: Tab = {
       id,
       name: c.name,
-      icon: c.icon || '📋',
+      icon: c.icon || 'boba',
       color: c.color || '#f39c12',
       position: Math.max(-1, ...this.s.tabs.map((t) => t.position)) + 1,
       repo_id: c.repo_id,
@@ -1237,7 +1237,7 @@ class MockServer implements Transport {
       if (!c.name?.trim()) throw new ApiFailure(400, 'A quest needs a name.', 'bad_request');
       if (!this.agent(c.agent_id)) throw new ApiFailure(400, 'Pick an agent for this quest.', 'bad_request');
       if (c.output === 'pull_request' && !c.repo_id) throw new ApiFailure(400, 'A pull request quest needs a repository.', 'bad_request');
-      const j: Job = { id: mkId('job'), name: c.name.trim(), description: c.description ?? '', icon: c.icon || '📜', agent_id: c.agent_id, prompt: c.prompt, schedule: c.schedule, output: c.output, enabled: c.enabled ?? true, repo_id: c.repo_id, tab_id: c.tab_id, skip_if_running: c.skip_if_running ?? true, last_run_id: null, last_run_at: null, next_run_at: null, last_result: null, runs_count: 0, created_by: this.me()?.id ?? null, created_at: now() };
+      const j: Job = { id: mkId('job'), name: c.name.trim(), description: c.description ?? '', icon: c.icon || 'quest', agent_id: c.agent_id, prompt: c.prompt, schedule: c.schedule, output: c.output, enabled: c.enabled ?? true, repo_id: c.repo_id, tab_id: c.tab_id, skip_if_running: c.skip_if_running ?? true, last_run_id: null, last_run_at: null, next_run_at: null, last_result: null, runs_count: 0, created_by: this.me()?.id ?? null, created_at: now() };
       j.next_run_at = j.enabled ? this.nextAt(j.schedule) : null;
       this.s.jobs.push(j);
       this.upsert({ entity: 'job', data: j });
@@ -1540,7 +1540,7 @@ class MockServer implements Transport {
       this.mentionReplies.delete(r.id);
       const rootC = this.s.comments.find((c) => c.id === root);
       if (rootC) {
-        const body = r.status === 'succeeded' ? `Done ✅ ${r.summary ?? ''}`.trim() : r.status === 'failed' ? `I got stuck: ${r.error ?? 'unknown error'}` : 'Someone called me back before I finished.';
+        const body = r.status === 'succeeded' ? `Done. ${r.summary ?? ''}`.trim() : r.status === 'failed' ? `I got stuck: ${r.error ?? 'unknown error'}` : 'Someone called me back before I finished.';
         const c: Comment = { ...this.blankComment(), ticket_id: rootC.ticket_id, job_id: rootC.job_id, anchor: rootC.anchor, parent_id: root, author_kind: 'agent', author_id: r.agent_id, body };
         this.s.comments.push(c);
         this.upsert({ entity: 'comment', data: c });

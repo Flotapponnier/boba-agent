@@ -12,6 +12,8 @@ import { useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { Modal } from '../ui/Overlay';
+import { Icon } from '../ui/Icon';
+import type { IconName } from '../../lib/icons';
 
 export const ROLE_HINT: Record<Role, string> = {
   viewer: 'Watches the board and live runs',
@@ -45,7 +47,7 @@ export function AccountChip({ onLoggedOut }: { onLoggedOut: () => Promise<void> 
   const [open, setOpen] = useState(false);
   const ref = useOutside(open, () => setOpen(false));
   if (!me) return null;
-  const item = (label: string, fn: () => void) => (
+  const item = (icon: IconName, label: string, fn: () => void) => (
     <button
       className="menu-item"
       role="menuitem"
@@ -54,6 +56,7 @@ export function AccountChip({ onLoggedOut }: { onLoggedOut: () => Promise<void> 
         fn();
       }}
     >
+      <Icon name={icon} />
       {label}
     </button>
   );
@@ -74,12 +77,12 @@ export function AccountChip({ onLoggedOut }: { onLoggedOut: () => Promise<void> 
                 <div className="hint-text">{me.email}</div>
               </div>
             </div>
-            {item('🧋 Profile', () => ui.show({ kind: 'profile' }))}
-            {item(canUsers ? '👥 Members & invites' : '👥 Members', () => ui.show({ kind: 'members' }))}
-            {item('🖥 Connect your Claude Code', () => ui.setView('runners'))}
-            {item('⚙ Settings', () => ui.show({ kind: 'settings' }))}
-            {item('⌨ Keyboard shortcuts', () => ui.show({ kind: 'shortcuts' }))}
-            {item('↩ Sign out', async () => {
+            {item('user', 'Profile', () => ui.show({ kind: 'profile' }))}
+            {item('users', canUsers ? 'Members & invites' : 'Members', () => ui.show({ kind: 'members' }))}
+            {item('terminal', 'Connect your Claude Code', () => ui.setView('runners'))}
+            {item('gear', 'Settings', () => ui.show({ kind: 'settings' }))}
+            {item('code', 'Keyboard shortcuts', () => ui.show({ kind: 'shortcuts' }))}
+            {item('logout', 'Sign out', async () => {
               await attempt(() => api.logout());
               connection.stop();
               useBoard.getState().reset();
@@ -95,15 +98,15 @@ export function AccountChip({ onLoggedOut }: { onLoggedOut: () => Promise<void> 
 
 // ------------------------------------------------------------ notifications
 
-const N_ICON: Record<Notification['kind'], string> = {
-  mention: '@',
-  reply: '↩',
-  run_finished: '✅',
-  run_failed: '💥',
-  run_waiting: '✋',
-  review_verdict: '🔍',
-  job_result: '📜',
-  account: '🔑',
+const N_ICON: Record<Notification['kind'], IconName> = {
+  mention: 'chat',
+  reply: 'reply',
+  run_finished: 'check',
+  run_failed: 'warn',
+  run_waiting: 'hand',
+  review_verdict: 'search',
+  job_result: 'quest',
+  account: 'key',
 };
 
 export function openNotification(n: Notification) {
@@ -146,7 +149,7 @@ export function Bell() {
           sfx('pearl', 0.5);
           const st = useBoard.getState();
           const sprite = n.actor_agent_id ? st.agents[n.actor_agent_id]?.sprite : undefined;
-          toast(`${N_ICON[n.kind]} ${n.message}`, n.kind === 'run_waiting' ? 'bad' : 'gold', sprite);
+          toast(n.message, n.kind === 'run_waiting' ? 'bad' : 'gold', sprite);
         }
       }),
     [],
@@ -160,7 +163,7 @@ export function Bell() {
   return (
     <div className="bell-wrap" ref={ref}>
       <button className={`btn icon bell ${bump ? 'ring' : ''}`} onClick={() => setOpen((o) => !o)} aria-label={`Notifications, ${unread} unread`} aria-expanded={open} title="Notifications">
-        🔔
+        <Icon name="bell" size={20} />
         {unread > 0 && <span className="bell-count">{unread > 99 ? '99+' : unread}</span>}
       </button>
       {open && (
@@ -199,8 +202,12 @@ function NotificationRow({ n, onOpen }: { n: Notification; onOpen: () => void })
   return (
     <button className={`n-row ${n.read ? '' : 'unread'}`} onClick={onOpen}>
       <span className="h-icon">
-        {actor ? <img src={actor.img} alt="" /> : <span>{N_ICON[n.kind]}</span>}
-        {actor && <span className="k">{N_ICON[n.kind]}</span>}
+        {actor ? <img src={actor.img} alt="" /> : <Icon name={N_ICON[n.kind]} size={18} />}
+        {actor && (
+          <span className="k">
+            <Icon name={N_ICON[n.kind]} size={12} />
+          </span>
+        )}
       </span>
       <span style={{ minWidth: 0 }}>
         <span className="h-msg">{n.message}</span>
@@ -363,7 +370,7 @@ export function MembersModal() {
                 <div className="invite-link">{invite.url}</div>
                 <div className="row" style={{ marginTop: 8 }}>
                   <button className="btn sm gold" onClick={() => void navigator.clipboard?.writeText(invite.url).then(() => toast('Invite link copied', 'good'))}>
-                    📋 Copy link
+                    <Icon name="copy" size={14} /> Copy link
                   </button>
                   <button className="btn sm ghost" onClick={() => setInvite(null)}>
                     Invite someone else
@@ -396,7 +403,7 @@ export function MembersModal() {
                 </select>
               </div>
               <div className="row end" style={{ marginTop: 8 }}>
-                <button className="btn gold sm">✉ Create invite link</button>
+                <button className="btn gold sm"><Icon name="mail" size={14} /> Create invite link</button>
               </div>
             </form>
           )}

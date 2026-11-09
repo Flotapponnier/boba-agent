@@ -7,12 +7,13 @@ import { usePrefs } from '../store/prefs';
 import { useCan, useOpenTicketCount, useTabs } from '../store/selectors';
 import { useBoard } from '../store/store';
 import { AccountChip, Bell } from './team/Account';
+import { Glyph, Icon } from './ui/Icon';
 import { useUi } from '../store/ui';
 
 const PLACES = [
-  { view: 'quests', icon: '📜', label: 'Quests', key: 'Q' },
-  { view: 'integrations', icon: '🔗', label: 'Repos', key: 'I' },
-  { view: 'portals', icon: '🌀', label: 'Portals', key: 'P' },
+  { view: 'quests', icon: 'quest', label: 'Quests', key: 'Q' },
+  { view: 'integrations', icon: 'repo', label: 'Repos', key: 'I' },
+  { view: 'portals', icon: 'portal', label: 'Portals', key: 'P' },
 ] as const;
 
 function TabButton({ id, active }: { id: string; active: boolean }) {
@@ -34,7 +35,7 @@ function TabButton({ id, active }: { id: string; active: boolean }) {
       title={canManage ? 'Double-click to customise' : undefined}
     >
       <span className="ico" aria-hidden="true">
-        {tab.icon}
+        <Glyph value={tab.icon} mono />
       </span>
       {tab.name} <span className="count">{count}</span>
       {active && canManage && (
@@ -49,7 +50,7 @@ function TabButton({ id, active }: { id: string; active: boolean }) {
           }}
           onKeyDown={(e) => e.key === 'Enter' && show({ kind: 'tab-edit', id })}
         >
-          ⚙
+          <Icon name="gear" size={12} />
         </span>
       )}
       {viewers.length > 0 && (
@@ -113,7 +114,7 @@ export function Header({ activeTab, onLoggedOut }: { activeTab: string | null; o
           ))}
           {canManage && (
             <button className="tab" onClick={() => ui.show({ kind: 'tab-new' })} aria-label="New tab" title="New tab">
-              +
+              <Icon name="plus" size={14} />
             </button>
           )}
           <span className="tab-sep" aria-hidden="true" />
@@ -127,7 +128,7 @@ export function Header({ activeTab, onLoggedOut }: { activeTab: string | null; o
               title={`${p.label} (${p.key})`}
             >
               <span className="ico" aria-hidden="true">
-                {p.icon}
+                <Icon name={p.icon} />
               </span>
               {p.label}
             </button>
@@ -154,28 +155,28 @@ export function Header({ activeTab, onLoggedOut }: { activeTab: string | null; o
         <Pearls />
         {canEdit && activeTab && (
           <button className="btn gold" onClick={() => ui.show({ kind: 'ticket-new', tabId: activeTab })} title="New ticket (N)">
-            + Ticket
+            <Icon name="plus" size={14} /> Ticket
           </button>
         )}
         {canAgents && (
           <button className="btn" onClick={() => ui.show({ kind: 'agent-new' })} title="Recruit an agent (A)">
-            + Agent
+            <Icon name="plus" size={14} /> Agent
           </button>
         )}
         <button className="btn icon cmd-btn" onClick={() => ui.setCommand({ open: true })} title="Command bar (⌘K / Ctrl+K)" aria-label="Command bar">
           ⌘K
         </button>
         <button className="btn icon" onClick={() => ui.setCommand({ open: true, voice: true })} title="Talk to the Concierge (hold Space)" aria-label="Voice command">
-          🎙
+          <Icon name="mic" size={20} />
         </button>
         <button className="btn icon" onClick={() => ui.open(ui.panel?.kind === 'history' ? null : { kind: 'history' })} title="History (H)" aria-label="History">
-          📜
+          <Icon name="clock" size={20} />
         </button>
         <button className="btn icon" onClick={() => ui.open(ui.panel?.kind === 'skills' ? null : { kind: 'skills' })} title="Skills (K)" aria-label="Skills">
-          📚
+          <Icon name="book" size={20} />
         </button>
         <button className={`btn icon ${musicOn ? 'on' : ''}`} onClick={() => setPrefs({ music: !musicOn })} title="Music (M)" aria-pressed={musicOn} aria-label="Music">
-          ♪
+          <Icon name="music" size={20} />
         </button>
         <Bell />
         <AccountChip onLoggedOut={onLoggedOut} />

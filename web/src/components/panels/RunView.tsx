@@ -11,6 +11,7 @@ import { Markdown } from '../ui/Markdown';
 import { Sprite } from '../ui/Sprite';
 import { runnerLabel } from '../../lib/runner';
 import { useUi } from '../../store/ui';
+import { Icon } from '../ui/Icon';
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === 'object' ? (v as Obj) : {});
@@ -81,7 +82,7 @@ function ToolInput({ name, input }: { name: string; input: Obj }) {
       <ul className="todos">
         {(input.todos as Obj[]).map((t, i) => (
           <li key={i} className={str(t.status)}>
-            {t.status === 'completed' ? '☑' : t.status === 'in_progress' ? '▶' : '☐'} {str(t.content)}
+            <Icon name={t.status === 'completed' ? 'checkbox-on' : t.status === 'in_progress' ? 'play' : 'checkbox'} size={12} /> {str(t.content)}
           </li>
         ))}
       </ul>
@@ -102,7 +103,7 @@ const ToolCard = memo(function ToolCard({ use, result, defaultOpen, root }: { us
       <summary>
         <span className="tool-name">{name}</span>
         <span className="tool-sum">{summary}</span>
-        <span className="tool-state">{result ? (isErr ? '✗' : '✓') : '…'}</span>
+        <span className="tool-state">{result ? <Icon name={isErr ? 'close' : 'check'} size={12} /> : '…'}</span>
       </summary>
       <div className="tool-body">
         <ToolInput name={name} input={obj(d.input)} />
@@ -133,10 +134,10 @@ function PermissionCard({ line, resolved, run }: { line: RunLogLine; resolved?: 
   };
   return (
     <div className={`perm ${resolved ? 'resolved' : ''}`}>
-      <h4>✋ PERMISSION: {str(p.tool) || 'tool'}</h4>
+      <h4>PERMISSION: {str(p.tool) || 'tool'}</h4>
       <pre>{JSON.stringify(p.input ?? {}, null, 2)}</pre>
       {resolved ? (
-        <span>{resolved.allow ? `✓ Allowed${who ? ` by ${who}` : ''}` : `✗ Denied${who ? ` by ${who}` : ''}`}</span>
+        <span>{resolved.allow ? `Allowed${who ? ` by ${who}` : ''}` : `Denied${who ? ` by ${who}` : ''}`}</span>
       ) : canRun && isActive(run) ? (
         <div className="row">
           <button className="btn green sm" disabled={busy} onClick={() => void answer(true)}>
@@ -182,7 +183,7 @@ function Verdict({ text }: { text: string }) {
     <div className="l-text">
       <Markdown text={text.replace(m[0], '').trim()} />
       <div style={{ marginTop: 6 }}>
-        <span className={`verdict ${verdict}`}>{verdict === 'approved' ? '✓ APPROVED' : '✗ CHANGES REQUESTED'}</span>
+        <span className={`verdict ${verdict}`}>{verdict === 'approved' ? 'APPROVED' : 'CHANGES REQUESTED'}</span>
         {!!v.feedback && <p style={{ marginTop: 4 }}>{str(v.feedback)}</p>}
       </div>
     </div>
@@ -204,11 +205,11 @@ function CostLabel({ run }: { run: Run }) {
   const sub = useBoard((s) => (run.runner_id ? s.runners[run.runner_id]?.auth === 'subscription' : false));
   return sub ? (
     <span title="This run used a Claude subscription: nothing is charged per token">
-      💰 <b>≈ {usd(run.cost_usd)}</b> list-price equivalent (included in subscription)
+      <Icon name="coin" size={12} /> <b>≈ {usd(run.cost_usd)}</b> list-price equivalent (included in subscription)
     </span>
   ) : (
     <span>
-      💰 <b>{usd(run.cost_usd)}</b>
+      <Icon name="coin" size={12} /> <b>{usd(run.cost_usd)}</b>
     </span>
   );
 }
@@ -223,7 +224,9 @@ function RunnerBadge({ run }: { run: Run }) {
   if (!l) return null;
   return (
     <div className={`runner-badge ${l.real ? 'real' : 'sim'}`} title={l.hint}>
-      <span>{l.real ? '⚡' : '🎭'} {l.text}</span>
+      <span>
+        <Icon name={l.real ? 'bolt' : 'gamepad'} size={12} /> {l.text}
+      </span>
       {l.where && <span className="hint-text">on {l.where}</span>}
       {!l.real && run.started_by === me && l.ownerId !== me && (
         <button
@@ -233,7 +236,7 @@ function RunnerBadge({ run }: { run: Run }) {
             setView('runners');
           }}
         >
-          Connect your own Claude Code to run it for real →
+          Connect your own Claude Code to run it for real
         </button>
       )}
     </div>
@@ -399,29 +402,29 @@ export function RunView({
         )}
         <div className="run-meta">
           <span>
-            ⏱ <b>{duration(run.started_at ?? run.created_at, run.ended_at, now)}</b>
+            <Icon name="clock" size={12} /> <b>{duration(run.started_at ?? run.created_at, run.ended_at, now)}</b>
           </span>
           <CostLabel run={run} />
           <span>
-            ⇣ <b>{compact(run.input_tokens)}</b> ⇡ <b>{compact(run.output_tokens)}</b> tokens
+            <b>{compact(run.input_tokens)}</b> in · <b>{compact(run.output_tokens)}</b> out tokens
           </span>
           {run.branch && (
             <span>
-              ⎇ <b>{run.branch}</b>
+              <Icon name="repo" size={12} /> <b>{run.branch}</b>
             </span>
           )}
           {run.verdict && <span className={`verdict ${run.verdict}`}>{run.verdict === 'approved' ? 'APPROVED' : 'CHANGES REQUESTED'}</span>}
         </div>
-        {run.error && <div className="form-error">⚠ {run.error}</div>}
+        {run.error && <div className="form-error">{run.error}</div>}
         <div className="row">
           {active && canRun && (
             <button className="btn red sm" onClick={() => void cancelRun(run.id)}>
-              ⏹ Call {agent?.name ?? 'the agent'} back
+              Call {agent?.name ?? 'the agent'} back
             </button>
           )}
           {canComment && onCommentRun && (
             <button className="btn sm ghost" onClick={onCommentRun} title="Start a thread about this run (verdict, report…)">
-              💬 Discuss this {run.kind === 'review' ? 'review' : run.kind === 'job' ? 'report' : 'run'}
+              <Icon name="chat" size={12} /> Discuss this {run.kind === 'review' ? 'review' : run.kind === 'job' ? 'report' : 'run'}
             </button>
           )}
         </div>
@@ -438,12 +441,12 @@ export function RunView({
               {node}
               {n ? (
                 <button className="tl-n" onClick={() => onCommentLine?.(l.seq)} title={`${n} comment(s) on this line`}>
-                  💬 {n}
+                  <Icon name="chat" size={12} /> {n}
                 </button>
               ) : null}
               {canComment && onCommentLine && (
                 <button className="tl-c" onClick={() => onCommentLine(l.seq)} aria-label="Comment on this line" title="Comment on this line">
-                  💬
+                  <Icon name="chat" size={14} />
                 </button>
               )}
             </div>
@@ -451,7 +454,7 @@ export function RunView({
         })}
         {!stick && (
           <button className="jump-live" onClick={() => setStick(true)}>
-            ↓ Jump to latest
+            <Icon name="arrow-down" size={12} /> Jump to latest
           </button>
         )}
       </div>

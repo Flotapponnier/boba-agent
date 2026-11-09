@@ -7,6 +7,7 @@ import { bodyUrl } from '../../lib/game';
 import { errorText } from '../../store/actions';
 import { useUi } from '../../store/ui';
 import { Modal } from '../ui/Overlay';
+import { Brand, Icon } from '../ui/Icon';
 
 const SETUP_PATH = '/settings/github/setup';
 
@@ -75,8 +76,12 @@ export function GithubSetup({ org, name }: { org?: string; name?: string }) {
       <div className="gh-setup-page">
         <div className="gh-hero">
           <img src={bodyUrl('boba')} alt="" />
-          <span className="gh-plus">+</span>
-          <span className="gh-octo-big">🐙</span>
+          <span className="gh-plus">
+            <Icon name="plus" size={24} />
+          </span>
+          <span className="gh-octo-big">
+            <Brand name="github" size={56} mono />
+          </span>
         </div>
         {err ? (
           <p className="form-error" role="alert">
@@ -91,7 +96,7 @@ export function GithubSetup({ org, name }: { org?: string; name?: string }) {
             </p>
             {m.warnings.map((w) => (
               <p key={w} className="gh-warning">
-                ⚠ {w}
+                <Icon name="warn" size={14} /> {w}
               </p>
             ))}
             {perms.length > 0 && (
@@ -129,7 +134,7 @@ export function GithubSetup({ org, name }: { org?: string; name?: string }) {
                 e.preventDefault();
                 void import('../../mock/server').then(({ mockServer }) => {
                   mockServer.githubSetup(org || 'boba-labs');
-                  toast('GitHub App created and installed (demo) 🐙', 'gold');
+                  toast('GitHub App created and installed (demo)', 'gold');
                   window.dispatchEvent(new Event('boba:github-changed'));
                   show(null);
                 });
@@ -141,7 +146,7 @@ export function GithubSetup({ org, name }: { org?: string; name?: string }) {
                   Not now
                 </button>
                 <button className="btn gold" autoFocus>
-                  🐙 Create the Boba Agent GitHub App
+                  <Brand name="github" size={14} mono /> Create the Boba Agent GitHub App
                 </button>
               </div>
             </form>

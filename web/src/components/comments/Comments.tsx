@@ -10,6 +10,7 @@ import { useAgentsList, useCan } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { UNAVAILABLE, useAvailable } from '../../store/features';
+import { Icon } from '../ui/Icon';
 
 const QUICK_EMOJI = ['👍', '🎉', '❤️', '👀', '🚀', '😂', '🧋', '🤔'];
 const MENTION_RE = /@\[([^\]]+)\]\((user|agent):([^)]+)\)/g;
@@ -190,7 +191,7 @@ export function Composer({
       </div>
       {agentMentions.length > 0 && ticketId && (
         <p className="hint-text agent-hint">
-          {canRun ? `⚡ ${agentMentions.map((a) => a.name).join(', ')} will start a run on this ticket with your comment as instructions.` : `🔒 Mentioning an agent starts a run only for people allowed to run agents.`}
+          {canRun ? `${agentMentions.map((a) => a.name).join(', ')} will start a run on this ticket with your comment as instructions.` : `Mentioning an agent starts a run only for people allowed to run agents.`}
         </p>
       )}
       <div className="row end">
@@ -242,7 +243,7 @@ function Reactions({ c }: { c: Comment }) {
         ))}
       <span style={{ position: 'relative' }}>
         <button className="react add" onClick={() => setOpen((o) => !o)} aria-label="Add a reaction" aria-expanded={open}>
-          ☺+
+          <Icon name="smile" size={14} />+
         </button>
         {open && (
           <span className="emoji-pop" role="menu">
@@ -324,7 +325,7 @@ function CommentItem({ c, ticketId, isRoot }: { c: Comment; ticketId: string | n
             const r = runs[rid];
             return (
               <button key={rid} className="chip on" onClick={() => r?.ticket_id && open({ kind: 'ticket', id: r.ticket_id, view: 'live', runId: rid })}>
-                ⚡ {r ? `run ${r.status === 'running' ? 'in progress' : r.status}` : 'run started'}
+                <Icon name="bolt" size={12} /> {r ? `run ${r.status === 'running' ? 'in progress' : r.status}` : 'run started'}
               </button>
             );
           })}
@@ -346,12 +347,12 @@ function AnchorBadge({ a, onJump }: { a: CommentAnchor; onJump?: (a: CommentAnch
     <button className="c-anchor" onClick={() => onJump?.(a)}>
       {a.on === 'run_log' ? (
         <>
-          📜 {agent?.name ?? 'Run'} · line {a.seq}
+          <Icon name="terminal" size={12} /> {agent?.name ?? 'Run'} · line {a.seq}
           {line && <code>{line.text.slice(0, 90)}</code>}
         </>
       ) : (
         <>
-          🏁 On {agent?.name ?? 'the agent'}'s {run?.kind === 'review' ? `review${run.verdict ? ` (${run.verdict === 'approved' ? 'approved' : 'changes requested'})` : ''}` : run?.kind === 'job' ? 'quest report' : 'run'}
+          <Icon name="flag" size={12} /> On {agent?.name ?? 'the agent'}'s {run?.kind === 'review' ? `review${run.verdict ? ` (${run.verdict === 'approved' ? 'approved' : 'changes requested'})` : ''}` : run?.kind === 'job' ? 'quest report' : 'run'}
         </>
       )}
     </button>
@@ -382,7 +383,7 @@ function Thread({ root, replies, ticketId, jobId, onJump, focus }: { root: Comme
       <AnchorBadge a={root.anchor} onJump={onJump} />
       {root.resolved && !expanded ? (
         <button className="thread-folded" onClick={() => setExpanded(true)}>
-          ✓ Resolved{resolver ? ` by ${resolver}` : ''} · {1 + replies.length} comment{replies.length ? 's' : ''} · show
+          <Icon name="check" size={12} /> Resolved{resolver ? ` by ${resolver}` : ''} · {1 + replies.length} comment{replies.length ? 's' : ''} · show
         </button>
       ) : (
         <>
@@ -395,12 +396,12 @@ function Thread({ root, replies, ticketId, jobId, onJump, focus }: { root: Comme
           <div className="thread-foot">
             {canEdit && !replying && (
               <button className="btn sm ghost" onClick={() => setReplying(true)}>
-                ↩ Reply
+                <Icon name="reply" size={12} /> Reply
               </button>
             )}
             {canEdit && (
               <button className="btn sm ghost" onClick={() => void setResolved(!root.resolved)}>
-                {root.resolved ? '↺ Reopen' : '✓ Resolve'}
+                {root.resolved ? 'Reopen' : 'Resolve'}
               </button>
             )}
           </div>
@@ -489,8 +490,8 @@ export function Discussion({
               <span className="grow">
                 <AnchorBadge a={draft} />
               </span>
-              <button className="btn sm ghost" onClick={onDraftDone}>
-                ✕
+              <button className="btn sm ghost" onClick={onDraftDone} aria-label="Cancel">
+                <Icon name="close" size={14} />
               </button>
             </div>
           )}
@@ -503,7 +504,7 @@ export function Discussion({
               const c = await attempt(() => api.createComment({ ticket_id: ticketId, job_id: jobId, anchor: draft ?? { on: 'ticket' }, parent_id: null, body }));
               if (c) {
                 useBoard.getState().upsert({ entity: 'comment', data: c });
-                if (c.triggered_run_ids.length) toast('Agent mentioned: a run is starting ⚡', 'gold');
+                if (c.triggered_run_ids.length) toast('Agent mentioned: a run is starting', 'gold');
                 onDraftDone?.();
               }
               return !!c;
@@ -518,7 +519,7 @@ export function Discussion({
       {threads.map((t) => (
         <Thread key={t.root.id} root={t.root} replies={t.replies} ticketId={ticketId} jobId={jobId} onJump={onJump} focus={t.root.id === focusRoot} />
       ))}
-      {!avail && <div className="sheet soon">🚧 Comments are {UNAVAILABLE.toLowerCase()}.</div>}
+      {!avail && <div className="sheet soon">Comments are {UNAVAILABLE.toLowerCase()}.</div>}
       {loaded && avail && threads.length === 0 && <p className="muted">No discussion yet. Select text in the task or hover a transcript line to comment on it.</p>}
     </div>
   );

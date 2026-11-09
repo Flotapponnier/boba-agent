@@ -180,7 +180,7 @@ export function FxLayer() {
             if (r && !calm) confetti(center(r), 28, 0.7);
           });
           sfx('pearl');
-          toast(`${name(f.agent_id)} finished T-${tnum(f.ticket_id) ?? '?'} and opened a PR 📬`, 'good', spriteOf(f.agent_id));
+          toast(`${name(f.agent_id)} finished T-${tnum(f.ticket_id) ?? '?'} and opened a PR`, 'good', spriteOf(f.agent_id));
           return;
         case 'xp_gained':
           if (calm) return;
@@ -203,7 +203,7 @@ export function FxLayer() {
               if (!calm) confetti(center(r), 48, 1);
             }
           }, 120);
-          toast(`${name(f.reviewer_id)} approved T-${tnum(f.ticket_id) ?? '?'}! 🧋`, 'gold', spriteOf(f.reviewer_id));
+          toast(`${name(f.reviewer_id)} approved T-${tnum(f.ticket_id) ?? '?'}`, 'gold', spriteOf(f.reviewer_id));
           return;
         case 'pearls_earned':
           if (calm) return;
@@ -246,7 +246,7 @@ export function FxLayer() {
               if (!calm) confetti(center(r), 50, 1);
             }
           }, 120);
-          if (j) toast(`Quest complete: "${j.name}" ⚔️ ${j.last_result ? j.last_result.replace(/[#*`]/g, '').slice(0, 80) : ''}`, 'gold', spriteOf(j.agent_id));
+          if (j) toast(`Quest complete: "${j.name}". ${j.last_result ? j.last_result.replace(/[#*`]/g, '').slice(0, 80) : ''}`, 'gold', spriteOf(j.agent_id));
           return;
         }
       }

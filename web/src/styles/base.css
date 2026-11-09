@@ -705,3 +705,40 @@ hr.dash {
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
 }
+
+/* ---------------- icons ---------------- */
+.icon {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: -0.15em;
+}
+.sign:has(> .icon),
+.hint-text:has(> .icon),
+.menu-item,
+.settings-nav button,
+.c-badge,
+.c-anchor,
+.run-meta > span,
+.runner-badge > span,
+.tool-state,
+.round-picker button,
+.portal-test,
+.quote-count,
+.tl-n,
+.tl-c,
+.link-btn,
+.jump-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmd-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  color: var(--wood-dark);
+}
+.glyph-text {
+  font-size: 1em;
+  line-height: 1;
+}

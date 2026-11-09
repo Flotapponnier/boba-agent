@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../api/client';
 import type { ActionResult, CommandAction, CommandPlan, Permission, PlannedAction, Priority } from '../../api/types';
 import { sfx } from '../../audio/audio';
@@ -13,6 +13,7 @@ import { useAgentsList, useConcierge, useTabs } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi, type Modal, type View } from '../../store/ui';
 import { UNAVAILABLE, useAvailable, useFeatures } from '../../store/features';
+import { Glyph, Icon } from '../ui/Icon';
 
 type Phase =
   | { k: 'input' }
@@ -37,6 +38,7 @@ const CONCIERGE = 'golden_boba';
 interface Quick {
   id: string;
   label: string;
+  icon?: ReactNode;
   hint: string;
   run: () => void;
 }
@@ -50,21 +52,21 @@ function useQuickActions(): Quick[] {
     const go = (v: View) => () => ui().setView(v);
     const modal = (m: Modal) => () => ui().show(m);
     const q: Quick[] = [
-      ...tabs.map((t) => ({ id: `tab-${t.id}`, label: `${t.icon} ${t.name}`, hint: 'Go to tab', run: () => ui().setTab(t.id) })),
-      { id: 'quests', label: '📜 Quest board', hint: 'Go to', run: go('quests') },
-      { id: 'integrations', label: '🔗 Integrations', hint: 'Go to', run: go('integrations') },
-      { id: 'portals', label: '🌀 Portals', hint: 'Go to', run: go('portals') },
-      { id: 'new-ticket', label: '📌 New ticket', hint: 'Create', run: () => ui().activeTab && ui().show({ kind: 'ticket-new', tabId: ui().activeTab as string }) },
-      { id: 'recruit', label: '🎉 Recruit a boba', hint: 'Create', run: modal({ kind: 'agent-new' }) },
-      { id: 'quest', label: '📜 Post a quest', hint: 'Create', run: modal({ kind: 'quest-new' }) },
-      { id: 'history', label: '🕰 Timeline', hint: 'Open', run: () => ui().open({ kind: 'history' }) },
-      { id: 'skills', label: '📚 Skill library', hint: 'Open', run: () => ui().open({ kind: 'skills' }) },
-      { id: 'settings', label: '⚙ Settings', hint: 'Open', run: modal({ kind: 'settings' }) },
-      ...agents.map((a) => ({ id: `agent-${a.id}`, label: `${a.name} (${a.role})`, hint: 'Agent profile', run: () => ui().open({ kind: 'agent', id: a.id }) })),
+      ...tabs.map((t) => ({ id: `tab-${t.id}`, label: t.name, icon: <Glyph value={t.icon} mono />, hint: 'Go to tab', run: () => ui().setTab(t.id) })),
+      { id: 'quests', label: 'Quest board', icon: <Icon name="quest" />, hint: 'Go to', run: go('quests') },
+      { id: 'integrations', label: 'Integrations', icon: <Icon name="repo" />, hint: 'Go to', run: go('integrations') },
+      { id: 'portals', label: 'Portals', icon: <Icon name="portal" />, hint: 'Go to', run: go('portals') },
+      { id: 'new-ticket', label: 'New ticket', icon: <Icon name="note" />, hint: 'Create', run: () => ui().activeTab && ui().show({ kind: 'ticket-new', tabId: ui().activeTab as string }) },
+      { id: 'recruit', label: 'Recruit a boba', icon: <Icon name="user-plus" />, hint: 'Create', run: modal({ kind: 'agent-new' }) },
+      { id: 'quest', label: 'Post a quest', icon: <Icon name="quest" />, hint: 'Create', run: modal({ kind: 'quest-new' }) },
+      { id: 'history', label: 'Timeline', icon: <Icon name="clock" />, hint: 'Open', run: () => ui().open({ kind: 'history' }) },
+      { id: 'skills', label: 'Skill library', icon: <Icon name="book" />, hint: 'Open', run: () => ui().open({ kind: 'skills' }) },
+      { id: 'settings', label: 'Settings', icon: <Icon name="gear" />, hint: 'Open', run: modal({ kind: 'settings' }) },
+      ...agents.map((a) => ({ id: `agent-${a.id}`, label: `${a.name} (${a.role})`, icon: <Icon name="user" />, hint: 'Agent profile', run: () => ui().open({ kind: 'agent', id: a.id }) })),
       ...Object.values(tickets)
         .sort((a, b) => b.number - a.number)
         .slice(0, 60)
-        .map((t) => ({ id: `t-${t.id}`, label: `T-${t.number} ${t.title}`, hint: 'Ticket', run: () => (ui().setTab(t.tab_id), ui().open({ kind: 'ticket', id: t.id })) })),
+        .map((t) => ({ id: `t-${t.id}`, label: `T-${t.number} ${t.title}`, icon: <Icon name="note" />, hint: 'Ticket', run: () => (ui().setTab(t.tab_id), ui().open({ kind: 'ticket', id: t.id })) })),
     ];
     return q;
   }, [tabs, agents, tickets, ui]);
@@ -92,7 +94,7 @@ function ActionEditor({ a, onChange }: { a: CommandAction; onChange: (a: Command
           <select value={a.ticket.tab_id} onChange={(e) => onChange({ ...a, ticket: { ...a.ticket, tab_id: e.target.value, column_id: null } })} aria-label="Tab">
             {tabs.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.icon} {t.name}
+                {t.name}
               </option>
             ))}
           </select>
@@ -129,7 +131,7 @@ function ActionEditor({ a, onChange }: { a: CommandAction; onChange: (a: Command
             </select>
           </div>
           <p className="hint-text">
-            ⏳ {describe(a.job.schedule)} · {a.job.output === 'tickets' ? '📋 files tickets' : a.job.output === 'pull_request' ? '🔧 opens a PR' : '📜 writes a report'} (fine-tune it on the Quest board after)
+            {describe(a.job.schedule)} · {a.job.output === 'tickets' ? 'files tickets' : a.job.output === 'pull_request' ? 'opens a PR' : 'writes a report'} (fine-tune it on the Quest board after)
           </p>
         </div>
       );
@@ -158,13 +160,13 @@ function PlanCard({ p, checked, onCheck, onEdit }: { p: PlannedAction; checked: 
         <span className="grow">{p.label}</span>
         {p.allowed && editable && (
           <button type="button" className="btn sm ghost" onClick={() => setEditing((v) => !v)} aria-expanded={editing}>
-            {editing ? 'Done' : '✎'}
+            {editing ? 'Done' : <Icon name="edit" size={14} title="Edit" />}
           </button>
         )}
       </label>
       {!p.allowed && (
         <p className="hint-text">
-          🔒 Needs the “{PERM_LABEL[p.required]}” permission (you are {role}).
+          <Icon name="lock" size={12} /> Needs the “{PERM_LABEL[p.required]}” permission (you are {role}).
         </p>
       )}
       {editing && p.allowed && (
@@ -398,7 +400,7 @@ export function CommandBar() {
     if (!q) return quick.slice(0, 7);
     return quick.filter((x) => x.label.toLowerCase().includes(q)).slice(0, 6);
   }, [quick, text]);
-  const items = text.trim() && conciergeOk ? [{ id: 'ask', label: `Ask the Concierge: “${text.trim()}”`, hint: 'Enter', run: () => void send(text, viaVoice.current) }, ...matches] : matches;
+  const items = text.trim() && conciergeOk ? [{ id: 'ask', label: `Ask the Concierge: “${text.trim()}”`, icon: <Icon name="sparkle" /> as ReactNode, hint: 'Enter', run: () => void send(text, viaVoice.current) }, ...matches] : matches;
 
   const execute = async (plan: CommandPlan, only?: number[]) => {
     const idx = only ?? plan.actions.map((_, i) => i).filter((i) => checked[i] && plan.actions[i]?.allowed);
@@ -411,7 +413,7 @@ export function CommandBar() {
       res.filter((r) => !r.ok).forEach((r) => toast(r.error ?? 'An action failed', 'bad'));
       if (ok) {
         sfx('done', 0.6);
-        toast(`Done! ${ok} action${ok > 1 ? 's' : ''} carried out ✨`, 'gold', speaker);
+        toast(`Done! ${ok} action${ok > 1 ? 's' : ''} carried out`, 'gold', speaker);
       }
       close();
       focusResults(res);
@@ -488,14 +490,14 @@ export function CommandBar() {
                 title="Hold Space anywhere to talk"
                 onClick={() => (phase.k === 'listening' ? void endVoice() : void beginVoice())}
               >
-                🎙
+                <Icon name="mic" size={20} />
               </button>
             </div>
 
             {phase.k === 'listening' && (
               <div className="cmd-body listening">
                 <Waveform levels={levels} />
-                <p className="hint-text">Speak, then release Space (or tap 🎙) to send.</p>
+                <p className="hint-text">Speak, then release Space (or tap the mic) to send.</p>
               </div>
             )}
             {voiceErr && phase.k === 'input' && <p className="form-error cmd-body">{voiceErr}</p>}
@@ -512,13 +514,14 @@ export function CommandBar() {
                         if (it.id !== 'ask') close();
                       }}
                     >
+                      <span className="cmd-ico">{it.icon}</span>
                       <span className="grow">{it.label}</span>
                       <small>{it.hint}</small>
                     </button>
                   </li>
                 ))}
                 {!conciergeOk && (
-                  <li className="cmd-tip hint-text">🚧 The Concierge is {UNAVAILABLE.toLowerCase()}: quick navigation only.</li>
+                  <li className="cmd-tip hint-text">The Concierge is {UNAVAILABLE.toLowerCase()}: quick navigation only.</li>
                 )}
                 {!text && conciergeOk && (
                   <li className="cmd-tip hint-text">
@@ -555,7 +558,7 @@ export function CommandBar() {
                       setAnswer('');
                     }}
                   >
-                    <p>🤔 {phase.plan.question}</p>
+                    <p>{phase.plan.question}</p>
                     <div className="row">
                       <input className="grow" autoFocus value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Your answer…" aria-label="Answer" />
                       <button className="btn sm gold">Reply</button>
@@ -577,7 +580,7 @@ export function CommandBar() {
                       disabled={phase.k === 'executing' || !phase.plan.actions.some((a, i) => a.allowed && checked[i])}
                       onClick={() => void execute(phase.plan)}
                     >
-                      {phase.k === 'executing' ? 'Working…' : phase.plan.actions.filter((a, i) => a.allowed && checked[i]).length > 1 ? '✓ Confirm all' : '✓ Confirm'}
+                      {phase.k === 'executing' ? 'Working…' : phase.plan.actions.filter((a, i) => a.allowed && checked[i]).length > 1 ? 'Confirm all' : 'Confirm'}
                     </button>
                   </div>
                 )}

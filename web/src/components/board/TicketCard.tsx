@@ -9,6 +9,7 @@ import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { Sprite } from '../ui/Sprite';
 import { useCommentCount } from '../comments/Comments';
+import { Icon } from '../ui/Icon';
 
 const plain = (md: string) =>
   md
@@ -79,7 +80,7 @@ export const TicketPaper = memo(function TicketPaper({ ticket: t, overlay, run, 
             onPointerDown={(e) => e.stopPropagation()}
             title={`Imported from GitHub ${t.source.kind === 'github_pr' ? 'PR' : 'issue'} #${t.source.number} by ${t.source.author}`}
           >
-            {t.source.kind === 'github_pr' ? '⇄' : '◉'} {t.source.number}
+            <Icon name={t.source.kind === 'github_pr' ? 'pr' : 'issue'} size={12} /> {t.source.number}
           </a>
         )}
         {t.pr_number != null && (
@@ -116,7 +117,7 @@ export const TicketPaper = memo(function TicketPaper({ ticket: t, overlay, run, 
           <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(run.progress * 100)}>
             <i style={{ width: `${Math.max(4, Math.round(run.progress * 100))}%` }} />
           </div>
-          <div className="activity">{run.status === 'waiting' ? '⚠ Needs your permission' : run.activity ?? 'Working…'}</div>
+          <div className="activity">{run.status === 'waiting' ? 'Needs your permission' : run.activity ?? 'Working…'}</div>
         </>
       )}
 
@@ -130,7 +131,7 @@ export const TicketPaper = memo(function TicketPaper({ ticket: t, overlay, run, 
         </div>
         {comments > 0 && (
           <span className={`c-badge ${t.open_thread_count ? 'open' : ''}`} title={`${comments} comment${comments > 1 ? 's' : ''}${t.open_thread_count ? `, ${t.open_thread_count} open thread${t.open_thread_count > 1 ? 's' : ''}` : ''}`}>
-            💬 {comments}
+            <Icon name="chat" size={12} /> {comments}
           </span>
         )}
         {worker && (

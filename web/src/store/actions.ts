@@ -60,7 +60,7 @@ export async function assignAgent(agentId: string, ticketId: string, via: 'drag'
     const mine = Object.values(st2.runners).some((x) => x.scope === 'personal' && x.owner_user_id === st2.me?.id);
     if (r && (r.auth === 'demo' || r.auth === 'unknown') && !mine && !simHintShown) {
       simHintShown = true;
-      setTimeout(() => toast('🎭 Simulated run. Connect your own Claude Code (account menu → Connect) to run it for real.', 'info'), 900);
+      setTimeout(() => toast('Simulated run. Connect your own Claude Code (account menu → Connect) to run it for real.', 'info'), 900);
     }
   }
   return run;
