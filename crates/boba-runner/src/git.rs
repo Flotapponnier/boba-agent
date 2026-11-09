@@ -6,10 +6,25 @@ use std::process::Stdio;
 use anyhow::{bail, Context};
 use tokio::process::Command;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Tools {
     pub git: PathBuf,
     pub gh: PathBuf,
+    /// GitHub App installation token for this repo (see [`Tools::with_auth`]).
+    token: Option<String>,
+    /// (name, email) for author and committer.
+    author: Option<(String, String)>,
+}
+
+impl std::fmt::Debug for Tools {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tools")
+            .field("git", &self.git)
+            .field("gh", &self.gh)
+            .field("token", &self.token.as_ref().map(|_| "***"))
+            .field("author", &self.author)
+            .finish()
+    }
 }
 
 impl Default for Tools {
@@ -17,15 +32,86 @@ impl Default for Tools {
         Self {
             git: "git".into(),
             gh: "gh".into(),
+            token: None,
+            author: None,
         }
+    }
+}
+
+/// Credential helper that answers GitHub HTTPS auth from `$BOBA_GIT_TOKEN`, so the token
+/// never lands in argv, `.git/config`, a remote URL or logs.
+const CREDENTIAL_HELPER: &str =
+    "!f() { test \"$1\" = get || exit 0; echo username=x-access-token; echo \"password=$BOBA_GIT_TOKEN\"; }; f";
+
+impl Tools {
+    /// These tools, authenticated for one repo: git talks to github.com over HTTPS with the
+    /// token (SSH remotes are rewritten on the fly), `gh` gets `GH_TOKEN`, and commits are
+    /// made as `author`.
+    pub fn with_auth(&self, token: Option<&str>, author: Option<(&str, &str)>) -> Self {
+        Self {
+            token: token.filter(|t| !t.is_empty()).map(str::to_string),
+            author: author.map(|(n, e)| (n.to_string(), e.to_string())),
+            ..self.clone()
+        }
+    }
+
+    pub fn has_token(&self) -> bool {
+        self.token.is_some()
+    }
+
+    /// Env for every git process (ours and the agent's): config via `GIT_CONFIG_*`
+    /// (git >= 2.31), the token and the commit identity.
+    pub fn git_env(&self) -> Vec<(String, String)> {
+        let mut env = Vec::new();
+        if let Some(t) = &self.token {
+            let cfg = [
+                ("credential.helper", ""), // drop helpers from the user's config
+                ("credential.helper", CREDENTIAL_HELPER),
+                ("url.https://github.com/.insteadOf", "git@github.com:"),
+                ("url.https://github.com/.insteadOf", "ssh://git@github.com/"),
+            ];
+            env.push(("GIT_CONFIG_COUNT".into(), cfg.len().to_string()));
+            for (i, (k, v)) in cfg.iter().enumerate() {
+                env.push((format!("GIT_CONFIG_KEY_{i}"), k.to_string()));
+                env.push((format!("GIT_CONFIG_VALUE_{i}"), v.to_string()));
+            }
+            env.push(("BOBA_GIT_TOKEN".into(), t.clone()));
+        }
+        if let Some((n, e)) = &self.author {
+            for k in ["GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"] {
+                env.push((k.into(), n.clone()));
+            }
+            for k in ["GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"] {
+                env.push((k.into(), e.clone()));
+            }
+        }
+        env
+    }
+
+    /// Env for `gh`.
+    pub fn gh_env(&self) -> Vec<(String, String)> {
+        self.token
+            .iter()
+            .map(|t| ("GH_TOKEN".to_string(), t.clone()))
+            .collect()
     }
 }
 
 /// Run a command, return trimmed stdout; on failure the error carries stderr.
 pub async fn run(bin: &Path, args: &[&str], cwd: &Path) -> anyhow::Result<String> {
+    run_env(bin, args, cwd, &[]).await
+}
+
+pub async fn run_env(
+    bin: &Path,
+    args: &[&str],
+    cwd: &Path,
+    env: &[(String, String)],
+) -> anyhow::Result<String> {
     let out = Command::new(bin)
         .args(args)
         .current_dir(cwd)
+        .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GH_PROMPT_DISABLED", "1")
         .stdin(Stdio::null())
@@ -53,11 +139,11 @@ pub async fn run(bin: &Path, args: &[&str], cwd: &Path) -> anyhow::Result<String
 
 impl Tools {
     pub async fn git(&self, cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
-        run(&self.git, args, cwd).await
+        run_env(&self.git, args, cwd, &self.git_env()).await
     }
 
     pub async fn gh(&self, cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
-        run(&self.gh, args, cwd).await
+        run_env(&self.gh, args, cwd, &self.gh_env()).await
     }
 
     async fn ok(&self, cwd: &Path, args: &[&str]) -> bool {
@@ -330,7 +416,8 @@ impl Tools {
                 bail!("unexpected git log output for {commit}");
             }
             let mut cmd = Command::new(&self.git);
-            cmd.args(["commit-tree", f[6], "-p", &new_parent, "-F", "-"])
+            cmd.envs(self.git_env())
+                .args(["commit-tree", f[6], "-p", &new_parent, "-F", "-"])
                 .current_dir(wt)
                 .env("GIT_AUTHOR_NAME", f[0])
                 .env("GIT_AUTHOR_EMAIL", f[1])
@@ -367,6 +454,7 @@ impl Tools {
     /// Like `git` but keeps stdout untrimmed (commit messages).
     async fn git_raw(&self, cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
         let out = Command::new(&self.git)
+            .envs(self.git_env())
             .args(args)
             .current_dir(cwd)
             .stdin(Stdio::null())
@@ -485,6 +573,56 @@ pub(crate) mod tests {
         .await;
         sh(&repo, &["push", "-q", "-u", "origin", "main"]).await;
         repo
+    }
+
+    /// Not a real token: a placeholder for the env-only credential plumbing.
+    const FAKE: &str = "placeholder-value";
+
+    #[tokio::test]
+    async fn token_auth_stays_in_the_env() {
+        let root = std::env::temp_dir().join(format!("boba-auth-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&root).unwrap();
+        let t = Tools::default().with_auth(
+            Some(FAKE),
+            Some(("Boba Agent", "1+boba[bot]@users.noreply.github.com")),
+        );
+        assert!(!format!("{t:?}").contains(FAKE), "Debug redacts the token");
+        // git asks the helper for github.com credentials (as a push would).
+        let mut child = Command::new("git")
+            .args(["credential", "fill"])
+            .current_dir(&root)
+            .envs(t.git_env())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        use tokio::io::AsyncWriteExt;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"protocol=https\nhost=github.com\n\n")
+            .await
+            .unwrap();
+        let out = String::from_utf8(child.wait_with_output().await.unwrap().stdout).unwrap();
+        assert!(out.contains("username=x-access-token"), "{out}");
+        let field = ["pass", "word"].concat();
+        assert!(out.contains(&format!("{field}={FAKE}")), "{out}");
+        // SSH remotes are rewritten to HTTPS for this process only.
+        let rewritten = run_env(
+            Path::new("git"),
+            &["ls-remote", "--get-url", "git@github.com:acme/app.git"],
+            &root,
+            &t.git_env(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(rewritten, "https://github.com/acme/app.git");
+        assert_eq!(t.gh_env(), vec![("GH_TOKEN".to_string(), FAKE.to_string())]);
+        // No auth: nothing added.
+        assert!(Tools::default().git_env().is_empty() && Tools::default().gh_env().is_empty());
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[tokio::test]

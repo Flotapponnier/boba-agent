@@ -720,7 +720,13 @@ impl Client {
             let url = repo.remote_url.clone().filter(|u| !u.trim().is_empty()).ok_or_else(|| {
                 anyhow!("remote runners need the repo's remote URL (set it on the repo in Boba Agent)")
             })?;
-            let local = self.repos.prepare(&url).await?;
+            let tools = Tools::default().with_auth(
+                repo.git_token.as_ref().map(|t| t.expose()),
+                repo.git_author
+                    .as_ref()
+                    .map(|a| (a.name.as_str(), a.email.as_str())),
+            );
+            let local = self.repos.prepare_with(&url, &tools).await?;
             repo.path = local.to_string_lossy().into_owned();
         }
         if !spec.skill_names.is_empty() {
@@ -798,6 +804,12 @@ impl RepoCache {
 
     /// Clone `url` if needed, else fetch it. Serialized per repo.
     pub async fn prepare(&self, url: &str) -> anyhow::Result<PathBuf> {
+        let tools = self.tools.clone();
+        self.prepare_with(url, &tools).await
+    }
+
+    /// [`prepare`](Self::prepare) with specific (e.g. token-authenticated) tools.
+    pub async fn prepare_with(&self, url: &str, tools: &Tools) -> anyhow::Result<PathBuf> {
         let slug = Self::slug(url);
         let lock = {
             let mut locks = self
@@ -820,13 +832,13 @@ impl RepoCache {
                     dir.display()
                 );
             }
-            if let Err(e) = self.tools.fetch(&dir).await {
+            if let Err(e) = tools.fetch(&dir).await {
                 tracing::warn!("git fetch failed for {url}: {e:#} (using the existing clone)");
             }
         } else {
             std::fs::create_dir_all(&self.root)?;
             let _ = std::fs::remove_dir_all(&dir);
-            self.tools
+            tools
                 .git(
                     &self.root,
                     &["clone", "--quiet", url, &dir.to_string_lossy()],
