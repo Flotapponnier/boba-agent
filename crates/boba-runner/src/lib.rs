@@ -10,6 +10,13 @@
 //!
 //! The trait below is the contract the server codes against. Keep it stable.
 
+pub mod demo;
+pub mod emit;
+pub mod skills;
+pub mod util;
+
+pub use demo::{DemoConfig, DemoRunner};
+
 use async_trait::async_trait;
 use boba_core::runner::{RunSpec, RunUpdate};
 use boba_core::{Id, Skill};
