@@ -33,4 +33,12 @@ review_feedback: string | null, review_rounds: number,
 /**
  * Origin (manual, GitHub issue/PR, job, agent).
  */
-source: TicketSource, created_by: string | null, created_at: string, updated_at: string, };
+source: TicketSource, 
+/**
+ * Non-deleted comments on this ticket (server-maintained, for the paper badge).
+ */
+comment_count: number, 
+/**
+ * Unresolved threads on this ticket.
+ */
+open_thread_count: number, created_by: string | null, created_at: string, updated_at: string, };

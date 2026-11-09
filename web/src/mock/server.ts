@@ -548,6 +548,8 @@ class MockServer implements Transport {
         id: mkId('tk'),
         number: ++this.s.seq,
         tab_id: c.tab_id,
+        comment_count: 0,
+        open_thread_count: 0,
         column_id: col.id,
         position: this.endPos(col.id),
         title: c.title.trim(),
@@ -1379,7 +1381,7 @@ class MockServer implements Transport {
         if (!tab || !col) continue;
         const t: Ticket = {
           id: mkId('tk'), number: ++this.s.seq, tab_id: tab.id, column_id: col.id, position: this.endPos(col.id), title: tk.title, body: tk.body, tags: tk.tags, priority: 'normal', color: null, repo_id: null,
-          agent_id: null, branch: null, pr_url: null, pr_number: null, review_feedback: null, review_rounds: 0, source: { kind: 'job', job_id: j.id, run_id: r.id }, created_by: null, created_at: now(), updated_at: now(),
+          agent_id: null, branch: null, pr_url: null, pr_number: null, review_feedback: null, review_rounds: 0, source: { kind: 'job', job_id: j.id, run_id: r.id }, comment_count: 0, open_thread_count: 0, created_by: null, created_at: now(), updated_at: now(),
         };
         this.s.tickets.push(t);
         this.upsert({ entity: 'ticket', data: t });
@@ -1437,7 +1439,7 @@ class MockServer implements Transport {
           const n = ++this.ghSeq;
           const t: Ticket = {
             id: mkId('tk'), number: ++this.s.seq, tab_id: tab.id, column_id: col.id, position: this.endPos(col.id), title: pick[0], body: `Imported from GitHub issue #${n} by @${pick[1]}.`, tags: [...pick[2]], priority: 'normal', color: null, repo_id: r.id,
-            agent_id: null, branch: null, pr_url: null, pr_number: null, review_feedback: null, review_rounds: 0, source: { kind: 'github_issue', repo_id: r.id, number: n, url: `https://github.com/${r.name}/issues/${n}`, author: pick[1] }, created_by: null, created_at: now(), updated_at: now(),
+            agent_id: null, branch: null, pr_url: null, pr_number: null, review_feedback: null, review_rounds: 0, source: { kind: 'github_issue', repo_id: r.id, number: n, url: `https://github.com/${r.name}/issues/${n}`, author: pick[1] }, comment_count: 0, open_thread_count: 0, created_by: null, created_at: now(), updated_at: now(),
           };
           this.s.tickets.push(t);
           this.upsert({ entity: 'ticket', data: t });
@@ -1451,7 +1453,7 @@ class MockServer implements Transport {
           const n = ++this.ghSeq;
           const t: Ticket = {
             id: mkId('tk'), number: ++this.s.seq, tab_id: tab.id, column_id: col.id, position: this.endPos(col.id), title: 'Add Turkish translation', body: `External PR #${n} by @ext-contrib.`, tags: ['i18n'], priority: 'normal', color: null, repo_id: r.id,
-            agent_id: null, branch: 'i18n-tr', pr_url: `https://github.com/${r.name}/pull/${n}`, pr_number: n, review_feedback: null, review_rounds: 0, source: { kind: 'github_pr', repo_id: r.id, number: n, url: `https://github.com/${r.name}/pull/${n}`, author: 'ext-contrib', head_branch: 'i18n-tr' }, created_by: null, created_at: now(), updated_at: now(),
+            agent_id: null, branch: 'i18n-tr', pr_url: `https://github.com/${r.name}/pull/${n}`, pr_number: n, review_feedback: null, review_rounds: 0, source: { kind: 'github_pr', repo_id: r.id, number: n, url: `https://github.com/${r.name}/pull/${n}`, author: 'ext-contrib', head_branch: 'i18n-tr' }, comment_count: 0, open_thread_count: 0, created_by: null, created_at: now(), updated_at: now(),
           };
           this.s.tickets.push(t);
           this.upsert({ entity: 'ticket', data: t });

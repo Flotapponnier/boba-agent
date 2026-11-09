@@ -333,6 +333,9 @@ pub async fn seed_demo(state: &SharedState, owner: Id) -> anyhow::Result<()> {
             created_at: now,
             updated_at: now,
             source: Default::default(),
+            // Maintained by the comments feature (server workstream).
+            comment_count: 0,
+            open_thread_count: 0,
         };
         state.db.save_ticket(&ticket).await?;
     }

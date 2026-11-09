@@ -188,6 +188,8 @@ export function seed(): MockState {
       column_id: `${tab}_c${col}`,
       position: seq * 1024,
       title,
+      comment_count: 0,
+      open_thread_count: 0,
       body,
       tags,
       priority,

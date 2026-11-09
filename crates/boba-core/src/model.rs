@@ -323,6 +323,12 @@ pub struct Ticket {
     /// Origin (manual, GitHub issue/PR, job, agent).
     #[serde(default)]
     pub source: crate::automation::TicketSource,
+    /// Non-deleted comments on this ticket (server-maintained, for the paper badge).
+    #[serde(default)]
+    pub comment_count: u32,
+    /// Unresolved threads on this ticket.
+    #[serde(default)]
+    pub open_thread_count: u32,
     pub created_by: Option<Id>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
