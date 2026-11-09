@@ -60,11 +60,12 @@ column and is picked up when the reviewer becomes idle (queue by time of entry).
 
 ### 3. Skills & personas
 An agent is a Claude Code persona: `system_prompt` is appended to Claude Code's system prompt,
-and its `skill_ids` decide which skill folders are exposed. The runner exposes only those skills
-by writing them (symlinks) into the worktree's `.claude/skills/` and running with
-`--setting-sources project` so the user's personal config does not leak between teammates.
-Boba-managed skills live in `<data>/skills/<name>/SKILL.md` and are editable from the UI;
-discovered user/project/plugin skills are read-only.
+and its `skill_ids` decide which skill folders are exposed. The runner builds a per-run plugin
+directory with symlinks to those skills and passes `--plugin-dir` (they appear as `boba:<skill>`),
+so nothing is written into the worktree (it would get committed). Runs use
+`--setting-sources project --strict-mcp-config`, which hides the server user's own skills, plugins,
+hooks and MCP servers. Boba-managed skills live in `<data>/skills/<name>/SKILL.md` and are editable
+from the UI; discovered user/project/plugin skills are read-only.
 
 ## Credentials and terms
 Shared servers must use an **organisation API key** (`ANTHROPIC_API_KEY`) or a cloud provider
@@ -74,7 +75,12 @@ terms reserve subscriptions for individual use. Without a key Boba Agent starts 
 
 ## Security defaults
 - Every run in its own worktree; never in the main checkout.
-- Per-run `CLAUDE_CONFIG_DIR` under `<data>/runs/<id>/claude` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+- Per-**agent** `CLAUDE_CONFIG_DIR` under `<data>/agents/<id>/claude` (per-run would break `--resume`)
+  and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. A fresh config dir has no OAuth login, so runs need
+  `ANTHROPIC_API_KEY` (or Bedrock/Vertex).
+- Headless sessions can reach other local Claude sessions, so runs pass `--disallowedTools` for
+  SendMessage, ListAgents, Cron*, ScheduleWakeup, RemoteTrigger, PushNotification, EnterWorktree,
+  ExitWorktree.
 - `bypassPermissions` only selectable by Admins, and only if the server runs inside a container
   (`BOBA_ALLOW_BYPASS=1`).
 - Reviews are read-only.
@@ -141,3 +147,30 @@ user only. The UI shows one confirmation card per action (editable); nothing hap
 confirms via `POST /api/command/execute`, which runs the actions with the user's own permissions and
 records `CommandIssued` / `CommandExecuted` in the history. The concierge never gets write tools, so a
 prompt-injected sentence cannot act on its own.
+
+### Board digest (`CommandSpec.board_digest`)
+Built by the server, parsed leniently by runners:
+```json
+{
+  "tabs":    [{"id": "…", "name": "Dev", "columns": [{"id": "…", "name": "PR Review", "kind": "review", "auto_reviewer_agent_id": "…"}]}],
+  "agents":  [{"id": "…", "name": "Pinky SEO", "role": "SEO"}],
+  "jobs":    [{"id": "…", "name": "Weekly SEO audit"}],
+  "repos":   [{"id": "…", "name": "openchainbench"}],
+  "tickets": [{"id": "…", "number": 12, "title": "…", "tab_id": "…"}],
+  "connectors": [{"id": "…", "name": "Search Console", "kind": "google_search_console"}],
+  "skills":  [{"id": "…", "name": "seo-audit"}]
+}
+```
+UI context is in `CommandSpec.tab_id/ticket_id/agent_id` (runners may also accept a legacy
+`board_digest.context` object). Tickets: the 200 most recently updated.
+
+## Claude Code CLI notes (2.1.319, verified)
+- `--max-turns`, `--permission-prompt-tool stdio` and `--permission-mode default` work though hidden in `--help`.
+- Permission prompts need `--input-format stream-json --permission-prompt-tool stdio`: stdout emits
+  `control_request {subtype: can_use_tool, tool_name, input, tool_use_id}`, answered on stdin with
+  `control_response {behavior: allow, updatedInput}` or `{behavior: deny, message}`. Without it,
+  prompts are silently denied.
+- Messages sent mid-run merge into the current turn (one `result` per batch); `--replay-user-messages`
+  echoes consumed messages with `isReplay: true`.
+- A `result` with `subtype: success` can still have `is_error: true` (e.g. "Not logged in").
+- `--allowedTools "Read,Grep,Bash(git diff:*)"` as one comma-joined argument works.

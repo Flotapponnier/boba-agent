@@ -76,6 +76,11 @@ pub struct CommandSpec {
     pub text: String,
     pub voice: bool,
     pub user_name: String,
+    /// UI context so "this" / "here" resolve.
+    pub tab_id: Option<Id>,
+    pub ticket_id: Option<Id>,
+    pub agent_id: Option<Id>,
+    /// Shape pinned in docs/ARCHITECTURE.md ("Board digest").
     pub board_digest: serde_json::Value,
 }
 
