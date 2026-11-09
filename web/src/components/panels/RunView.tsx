@@ -89,12 +89,14 @@ function ToolInput({ name, input }: { name: string; input: Obj }) {
   return <pre>{JSON.stringify(input, null, 2)}</pre>;
 }
 
-const ToolCard = memo(function ToolCard({ use, result, defaultOpen }: { use: RunLogLine; result?: RunLogLine; defaultOpen: boolean }) {
+const ToolCard = memo(function ToolCard({ use, result, defaultOpen, root }: { use: RunLogLine; result?: RunLogLine; defaultOpen: boolean; root?: string | null }) {
   const d = obj(use.data);
   const name = str(d.name) || 'Tool';
   const r = obj(result?.data);
   const isErr = r.is_error === true;
-  const summary = use.text.startsWith(name) ? use.text.slice(name.length).trim() : use.text;
+  const raw = use.text.startsWith(name) ? use.text.slice(name.length).trim() : use.text;
+  // Paths inside the run's worktree read better relative to it.
+  const summary = root ? raw.split(`${root.replace(/\/$/, '')}/`).join('') : raw;
   return (
     <details className={`tool ${isErr ? 'err' : ''} ${result ? '' : 'pending'}`} open={defaultOpen || name === 'TodoWrite'}>
       <summary>
@@ -222,7 +224,8 @@ function RunnerBadge({ run }: { run: Run }) {
   return (
     <div className={`runner-badge ${l.real ? 'real' : 'sim'}`} title={l.hint}>
       <span>{l.real ? '⚡' : '🎭'} {l.text}</span>
-      {!l.real && run.started_by === me && (
+      {l.where && <span className="hint-text">on {l.where}</span>}
+      {!l.real && run.started_by === me && l.ownerId !== me && (
         <button
           className="link-btn"
           onClick={() => {
@@ -337,7 +340,7 @@ export function RunView({
           </details>
         );
       case 'tool_use':
-        return <ToolCard key={l.seq} use={l} result={items.results.get(str(obj(l.data).id))} defaultOpen={active && i === lastToolIdx} />;
+        return <ToolCard key={l.seq} use={l} result={items.results.get(str(obj(l.data).id))} defaultOpen={active && i === lastToolIdx} root={run.worktree_path} />;
       case 'tool_result': {
         const id = str(obj(l.data).tool_use_id);
         // Orphan results (no matching tool_use) still show.
