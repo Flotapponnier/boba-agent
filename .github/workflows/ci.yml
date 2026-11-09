@@ -16,14 +16,21 @@ jobs:
       - run: cargo test
   web:
     runs-on: ubuntu-latest
-    if: hashFiles('web/package.json') != ''
     defaults: { run: { working-directory: web } }
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - id: has_web
+        working-directory: .
+        run: if [ -f web/package.json ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.has_web.outputs.yes == 'true'
+        uses: pnpm/action-setup@v4
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - if: steps.has_web.outputs.yes == 'true'
+        uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm, cache-dependency-path: web/pnpm-lock.yaml }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm build
+      - if: steps.has_web.outputs.yes == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.has_web.outputs.yes == 'true'
+        run: pnpm typecheck
+      - if: steps.has_web.outputs.yes == 'true'
+        run: pnpm build
