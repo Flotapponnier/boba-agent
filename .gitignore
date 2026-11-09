@@ -1,0 +1,14 @@
+/target
+node_modules/
+web/dist/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+.DS_Store
+# local-only research and throwaway prototype
+/research_notes/
+/reports/
+/prototype/
+/data/

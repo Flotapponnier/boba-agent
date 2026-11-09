@@ -1,0 +1,16 @@
+# Boba Agent
+
+> Boba Agent is an open-source (MIT), self-hosted, gamified kanban board and multi-agent IDE for Claude Code. A team runs one Rust binary on a server, creates Claude Code agents (personas with a system prompt, Agent Skills, model and permission mode) shown as boba characters, drags them onto tickets to start headless Claude Code runs in isolated git worktrees, and gets every pull request reviewed automatically by a reviewer agent in a dedicated PR column. All activity is live and recorded in a shared history.
+
+Key facts:
+- Backend: Rust (axum, SQLite, WebSocket). Frontend: React + TypeScript + Vite. Single binary.
+- Agents run the Claude Code CLI in `stream-json` headless mode, one git worktree and branch per run; PRs are opened with the GitHub CLI.
+- Demo mode simulates agents when no ANTHROPIC_API_KEY is configured.
+- Roles: owner, admin, member, viewer. Custom tabs (Dev, Review, SEO…) each with their own columns.
+- Not affiliated with Anthropic. Shared servers should use an organisation API key, not a personal Claude subscription.
+
+## Docs
+- [README](https://github.com/Flotapponnier/boba-agent/blob/main/README.md): overview, quick start, FAQ
+- [Architecture](https://github.com/Flotapponnier/boba-agent/blob/main/docs/ARCHITECTURE.md): crates, run lifecycle, auto review, security
+- [API](https://github.com/Flotapponnier/boba-agent/blob/main/docs/API.md): REST and WebSocket protocol
+- [Contributing](https://github.com/Flotapponnier/boba-agent/blob/main/CONTRIBUTING.md)

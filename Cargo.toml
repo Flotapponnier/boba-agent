@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = ["crates/boba-core", "crates/boba-runner", "crates/boba-server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Flotapponnier/boba-agent"
+homepage = "https://github.com/Flotapponnier/boba-agent"
+rust-version = "1.85"
+
+[workspace.dependencies]
+boba-core = { path = "crates/boba-core" }
+boba-runner = { path = "crates/boba-runner" }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+ts-rs = { version = "10", features = ["uuid-impl", "chrono-impl", "serde-json-impl"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
