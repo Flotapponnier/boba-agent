@@ -23,6 +23,7 @@ export interface MockUser extends User {
 }
 
 export interface MockState {
+  github?: import('../api/types').GithubAppStatus;
   comments: import('../api/types').Comment[];
   notifications: import('../api/types').Notification[];
   jobs: import('../api/types').Job[];

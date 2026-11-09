@@ -51,6 +51,8 @@ import type {
   RunnerToken,
   UpdateComment,
   UpdateMe,
+  GithubAppStatus,
+  GithubRepo,
 } from './types';
 import { httpTransport, type Transport } from './transport';
 
@@ -142,4 +144,9 @@ export const api = {
   markRead: (ids: string[] | null) => req<void>('POST', '/api/notifications/read', { ids }),
   createRunner: (b: CreateRunner) => req<RunnerToken>('POST', '/api/runners', b),
   deleteRunner: (id: string) => req<void>('DELETE', `/api/runners/${id}`),
+
+  githubApp: () => req<GithubAppStatus>('GET', '/api/github/app'),
+  githubRepos: () => req<GithubRepo[]>('GET', '/api/github/repos'),
+  /** Full-page navigation target (GitHub's app-manifest flow), not a fetch. */
+  githubSetupUrl: (org?: string, name?: string) => `/api/github/app/setup${qs({ org, name })}`,
 };

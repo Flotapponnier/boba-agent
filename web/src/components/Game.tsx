@@ -41,6 +41,7 @@ import { HistoryDrawer } from './panels/HistoryDrawer';
 import { SkillsDrawer } from './panels/SkillsDrawer';
 import { TicketPanel } from './panels/TicketPanel';
 import { Tavern } from './tavern/Tavern';
+import { handleGithubReturn } from './integrations/GithubCard';
 import { MembersModal, ProfileModal } from './team/Account';
 import { RunnersPage } from './team/Runners';
 import { CommandBar } from './command/CommandBar';
@@ -97,6 +98,14 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
       if (activeTab !== usePrefs.getState().lastTab) usePrefs.getState().set({ lastTab: activeTab });
     }
   }, [activeTab]);
+
+  // Back from GitHub's app setup / install pages.
+  useEffect(() => {
+    if (!ready || !handleGithubReturn()) return;
+    ui.setView('integrations');
+    toast('Welcome back from GitHub 🐙 The app is set up: add a repo below.', 'gold');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   // Deep link: #/t/<number> opens a ticket.
   useEffect(() => {

@@ -9,6 +9,7 @@ import { useCan, useTabs } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi } from '../../store/ui';
 import { UNAVAILABLE, useAvailable } from '../../store/features';
+import { GithubCard } from './GithubCard';
 
 function Toggle({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }) {
   return (
@@ -175,10 +176,11 @@ export function Integrations() {
         </div>
         {canWs && (
           <button className="btn gold" onClick={() => show({ kind: 'settings', section: 'repos' })}>
-            + Connect a repo
+            + Add repo manually
           </button>
         )}
       </div>
+      <GithubCard />
       <div className="repo-grid">
         {list.map((r) => (
           <RepoCard key={r.id} repo={r} />
