@@ -271,7 +271,10 @@ impl AppState {
         })
     }
 
+    /// Full board state. Taken under the orchestrator lock so it never shows a half-applied
+    /// transition (e.g. a ticket already in Done but its pearls not counted yet).
     pub async fn snapshot(&self, me: Option<User>) -> anyhow::Result<Snapshot> {
+        let _consistent = self.orch_lock.lock().await;
         let db = &self.db;
         let (tabs, agents, tickets, runs, skills, repos, users) = tokio::try_join!(
             db.tabs(),
