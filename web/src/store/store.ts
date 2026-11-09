@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import type {
   Agent,
+  Comment,
   Connector,
+  Notification,
   Job,
   Entity,
   EntityKind,
@@ -37,6 +39,8 @@ export interface EntityMaps {
   runners: Dict<RunnerInfo>;
   jobs: Dict<Job>;
   connectors: Dict<Connector>;
+  comments: Dict<Comment>;
+  notifications: Dict<Notification>;
 }
 
 const KEY: Record<EntityKind, keyof EntityMaps> = {
@@ -50,6 +54,8 @@ const KEY: Record<EntityKind, keyof EntityMaps> = {
   runner: 'runners',
   job: 'jobs',
   connector: 'connectors',
+  comment: 'comments',
+  notification: 'notifications',
 };
 
 export interface BoardState extends EntityMaps {
@@ -82,7 +88,7 @@ const byId = <T extends { id: string }>(xs: T[]): Dict<T> => {
   return o;
 };
 
-const empty: EntityMaps = { tabs: {}, agents: {}, tickets: {}, runs: {}, skills: {}, repos: {}, users: {}, runners: {}, jobs: {}, connectors: {} };
+const empty: EntityMaps = { tabs: {}, agents: {}, tickets: {}, runs: {}, skills: {}, repos: {}, users: {}, runners: {}, jobs: {}, connectors: {}, comments: {}, notifications: {} };
 
 function mergeSortedLogs(cur: RunLogLine[] | undefined, add: RunLogLine[]): RunLogLine[] {
   if (!cur || cur.length === 0) return [...add].sort((a, b) => a.seq - b.seq);

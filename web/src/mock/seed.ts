@@ -273,7 +273,7 @@ export function seed(): MockState {
       { id: 'r_site', name: 'boba-labs/site', path: '/srv/repos/site', remote_url: 'git@github.com:boba-labs/site.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
       { id: 'r_infra', name: 'boba-labs/infra', path: '/srv/repos/infra', remote_url: 'git@github.com:boba-labs/infra.git', default_branch: 'main', runner_id: null, sync: defaultSync() },
     ],
-    runners: [{ id: 'local', name: 'local (this server)', online: true, max_concurrent_runs: 4, active_runs: 0, last_seen_at: iso(0) }],
+    runners: [{ id: 'local', name: 'local (this server)', online: true, max_concurrent_runs: 4, active_runs: 0, last_seen_at: iso(0), scope: 'shared', owner_user_id: null, auth: 'demo', host: 'boba-hq', claude_version: null }],
     history,
     settings: { name: 'Boba HQ', theme: 'sky', music_enabled_by_default: false, demo_mode: true, speech: { type: 'browser' } },
     stats: { pearls: 128, runs_completed: 47, prs_approved: 18, total_cost_usd: 23.41 },
