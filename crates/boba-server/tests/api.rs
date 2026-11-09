@@ -3733,3 +3733,36 @@ async fn remote_capacity_is_the_smaller_of_registered_and_hello() {
     let third = runner_recv(&mut ws2).await.unwrap();
     assert_eq!(third["type"], "start");
 }
+
+#[tokio::test]
+async fn github_app_manifest_as_json_for_the_spa() {
+    let mut cfg = Config::for_tests(tmp_dir());
+    cfg.public_url = "http://localhost:7777".into();
+    let runner = FakeRunner::new();
+    let r: Arc<dyn Runner> = Arc::new(runner.clone());
+    let srv = start_cfg(cfg, Runners::from(r), runner).await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    assert_eq!(
+        srv.get(&member, "/github/app/manifest").await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (s, v) = srv
+        .get(
+            &owner,
+            "/github/app/manifest?org=acme&name=Boba%20Agent%20Acme",
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["action_url"]
+        .as_str()
+        .unwrap()
+        .starts_with("https://github.com/organizations/acme/settings/apps/new?state="));
+    assert_eq!(v["manifest"]["name"], "Boba Agent Acme");
+    assert_eq!(
+        v["manifest"]["hook_attributes"]["url"],
+        "http://localhost:7777/api/github/webhook"
+    );
+    assert_eq!(v["manifest"]["default_permissions"]["contents"], "write");
+    assert!(v["warnings"][0].as_str().unwrap().contains("local address"));
+}
