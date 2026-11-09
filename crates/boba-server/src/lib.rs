@@ -9,6 +9,7 @@ pub mod connectors;
 pub mod db;
 pub mod error;
 pub mod hub;
+pub mod notify;
 pub mod orchestrator;
 pub mod routes;
 pub mod seed;

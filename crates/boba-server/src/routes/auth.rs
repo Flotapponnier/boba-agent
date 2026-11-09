@@ -4,6 +4,7 @@ use axum::Json;
 use axum_extra::extract::cookie::CookieJar;
 use boba_core::api::*;
 use boba_core::event::{Entity, HistoryKind};
+use boba_core::team::{NotificationKind, USER_AVATARS};
 use boba_core::*;
 use chrono::Utc;
 
@@ -46,11 +47,13 @@ fn clean_name(name: &str) -> AppResult<String> {
 }
 
 /// Sprite used as avatar, picked deterministically from the email.
-fn avatar_for(email: &str) -> String {
-    let h = email
-        .bytes()
-        .fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize));
-    SPRITES[h % SPRITES.len()].to_string()
+/// Humans get a random square portrait (agents use the full-body sprites).
+fn avatar_for(_email: &str) -> String {
+    use rand::seq::SliceRandom;
+    USER_AVATARS
+        .choose(&mut rand::thread_rng())
+        .unwrap_or(&"boba_avatar")
+        .to_string()
 }
 
 pub async fn setup(
@@ -225,6 +228,23 @@ pub async fn update_user(
         ));
     }
     state.db.set_role(id, req.role).await?;
+    if target.role != req.role {
+        state
+            .notify(
+                [id],
+                NotificationKind::Account,
+                &format!(
+                    "{} changed your role to {}",
+                    me.name,
+                    crate::db::enc(&req.role)
+                ),
+                crate::notify::Target {
+                    actor_user: Some(me.id),
+                    ..Default::default()
+                },
+            )
+            .await;
+    }
     let user = state.db.user(id).await?.ok_or(AppError::NotFound("user"))?;
     state.upsert(Entity::User(user.clone()));
     Ok(Json(user))

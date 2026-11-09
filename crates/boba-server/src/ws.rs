@@ -43,6 +43,8 @@ async fn session(state: SharedState, user: User, token_hash: String, socket: Web
     let (tx, mut rx) = mpsc::channel::<ServerMessage>(1024);
     let mut board = state.hub.subscribe();
     let mut revoked = state.hub.revocations();
+    let mut resyncs = state.hub.resyncs();
+    state.hub.register_conn(conn, user.id, tx.clone());
     let mut subs: HashSet<Id> = HashSet::new();
 
     // The snapshot goes straight to the socket so it is always the first message.
@@ -97,6 +99,7 @@ async fn session(state: SharedState, user: User, token_hash: String, socket: Web
                     _ => {}
                 }
             }
+            Ok(()) = resyncs.recv() => send_snapshot(&state, &user, &tx).await,
             r = revoked.recv() => match r {
                 Ok(h) if h == token_hash => {
                     let _ = sink.send(Message::Close(None)).await;

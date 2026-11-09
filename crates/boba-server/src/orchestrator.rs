@@ -16,7 +16,9 @@ use tokio::sync::mpsc;
 
 use crate::db::new_id;
 use crate::error::{AppError, AppResult};
+use crate::notify::Target;
 use crate::state::{Actor, Refs, SharedState};
+use boba_core::team::NotificationKind;
 
 pub const XP_WORK: u32 = 40;
 pub const XP_WORK_SKILL_MATCH: u32 = 60;
@@ -171,6 +173,55 @@ async fn xp_effects(state: &SharedState, agent: &Agent, amount: u32, ups: &[u32]
             )
             .await;
     }
+}
+
+// ---------------------------------------------------------------- notifications
+
+/// The human who started the run (auto reviews have none).
+async fn notify_starter(state: &SharedState, run: &Run, kind: NotificationKind, message: &str) {
+    if let Some(u) = run.started_by {
+        state
+            .notify(
+                [u],
+                kind,
+                message,
+                Target {
+                    ticket: run.ticket_id,
+                    run: Some(run.id),
+                    actor_agent: Some(run.agent_id),
+                    ..Default::default()
+                },
+            )
+            .await;
+    }
+}
+
+/// A review verdict: the ticket's creator and whoever started its latest work run.
+async fn notify_verdict(state: &SharedState, run: &Run, ticket: &Ticket, message: &str) {
+    let mut users: Vec<Id> = ticket.created_by.into_iter().collect();
+    if let Ok(runs) = state.db.runs_for_ticket(ticket.id).await {
+        if let Some(u) = runs
+            .iter()
+            .find(|r| r.kind == RunKind::Work)
+            .and_then(|r| r.started_by)
+        {
+            users.push(u);
+        }
+    }
+    users.extend(run.started_by);
+    state
+        .notify(
+            users,
+            NotificationKind::ReviewVerdict,
+            message,
+            Target {
+                ticket: Some(ticket.id),
+                run: Some(run.id),
+                actor_agent: Some(run.agent_id),
+                ..Default::default()
+            },
+        )
+        .await;
 }
 
 // ---------------------------------------------------------------- assign / create
@@ -657,7 +708,7 @@ async fn on_event_locked(state: &SharedState, run_id: Id, upd: RunUpdate) -> any
                 }
                 .agent(a.id)
                 .run(run.id);
-                state
+                if let Some(ev) = state
                     .record(
                         HistoryKind::RunWaiting,
                         Actor::Agent(a.id),
@@ -665,7 +716,10 @@ async fn on_event_locked(state: &SharedState, run_id: Id, upd: RunUpdate) -> any
                         format!("{} needs permission to use {tool}", a.name),
                         Some(json!({ "request_id": request_id, "tool": tool })),
                     )
-                    .await;
+                    .await
+                {
+                    notify_starter(state, &run, NotificationKind::RunWaiting, &ev.message).await;
+                }
             }
             state
                 .server_log(
@@ -850,7 +904,7 @@ async fn finish_inner(
                     .pr_number
                     .map(|n| format!(", PR #{n} is ready"))
                     .unwrap_or_default();
-                state
+                if let Some(ev) = state
                     .record(
                         HistoryKind::RunSucceeded,
                         Actor::Agent(a.id),
@@ -858,7 +912,10 @@ async fn finish_inner(
                         format!("{} finished {}{pr} (+{xp} XP)", a.name, tref(&ticket)),
                         Some(json!({ "xp": xp, "cost_usd": run.cost_usd, "summary": run.summary })),
                     )
-                    .await;
+                    .await
+                {
+                    notify_starter(state, &run, NotificationKind::RunFinished, &ev.message).await;
+                }
                 xp_effects(state, a, xp, &ups, refs).await;
             }
             (RunKind::Review, RunStatus::Succeeded) => {
@@ -925,7 +982,7 @@ async fn finish_inner(
                         total: stats.pearls,
                     });
                     let round = if first_round { " on the first try" } else { "" };
-                    state
+                    if let Some(ev) = state
                         .record(
                             HistoryKind::ReviewApproved,
                             Actor::Agent(a.id),
@@ -938,7 +995,9 @@ async fn finish_inner(
                             ),
                             Some(json!({ "xp": XP_REVIEW, "pearls": pearls, "feedback": outcome.feedback })),
                         )
-                        .await;
+                        .await {
+                        notify_verdict(state, &run, &ticket, &ev.message).await;
+                    }
                 } else {
                     ticket.review_feedback = outcome
                         .feedback
@@ -959,7 +1018,7 @@ async fn finish_inner(
                         ticket_id: ticket.id,
                         reviewer_id: a.id,
                     });
-                    state
+                    if let Some(ev) = state
                         .record(
                             HistoryKind::ReviewChangesRequested,
                             Actor::Agent(a.id),
@@ -972,7 +1031,10 @@ async fn finish_inner(
                             ),
                             Some(json!({ "xp": XP_REVIEW, "feedback": ticket.review_feedback })),
                         )
-                        .await;
+                        .await
+                    {
+                        notify_verdict(state, &run, &ticket, &ev.message).await;
+                    }
                 }
                 xp_effects(state, a, XP_REVIEW, &ups, refs).await;
             }
@@ -1009,7 +1071,7 @@ async fn finish_inner(
                     } else {
                         "run on"
                     };
-                    state
+                    if let Some(ev) = state
                         .record(
                             HistoryKind::RunFailed,
                             Actor::Agent(a.id),
@@ -1017,7 +1079,10 @@ async fn finish_inner(
                             format!("{}'s {what} {} failed: {err}", a.name, tref(&ticket)),
                             Some(json!({ "error": err })),
                         )
-                        .await;
+                        .await
+                    {
+                        notify_starter(state, &run, NotificationKind::RunFailed, &ev.message).await;
+                    }
                 }
             }
         }
