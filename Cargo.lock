@@ -347,6 +347,7 @@ dependencies = [
  "axum-extra",
  "base64 0.22.1",
  "boba-core",
+ "boba-github",
  "boba-runner",
  "chrono",
  "chrono-tz",

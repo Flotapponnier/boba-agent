@@ -28,6 +28,8 @@ struct Script {
     silent: bool,
     specs: Vec<RunSpec>,
     cancelled: Vec<Id>,
+    /// What command runs answer (the parsed boba-plan block).
+    plan: Option<Value>,
 }
 
 #[derive(Clone)]
@@ -88,7 +90,7 @@ impl Runner for FakeRunner {
         4
     }
     async fn start(&self, spec: RunSpec, tx: UpdateTx) -> anyhow::Result<()> {
-        let (verdict, hang) = {
+        let (verdict, hang, plan) = {
             let mut s = self.script.lock().unwrap();
             s.specs.push(spec.clone());
             if s.silent {
@@ -101,7 +103,7 @@ impl Runner for FakeRunner {
             } else {
                 None
             };
-            (v, s.hang)
+            (v, s.hang, s.plan.clone())
         };
         self.live.lock().unwrap().push((spec.run_id, tx.clone()));
         tokio::spawn(async move {
@@ -166,7 +168,11 @@ impl Runner for FakeRunner {
                         verdict,
                         feedback,
                         error: None,
-                        plan: None,
+                        plan: if spec.kind == RunKind::Command {
+                            plan
+                        } else {
+                            None
+                        },
                     },
                 })
                 .await;
@@ -231,6 +237,11 @@ async fn start_in(dir: PathBuf, runner: FakeRunner) -> Srv {
 
 async fn start_with(dir: PathBuf, runners: Runners, runner: FakeRunner) -> Srv {
     let cfg = Config::for_tests(dir.clone());
+    start_cfg(cfg, runners, runner).await
+}
+
+async fn start_cfg(cfg: Config, runners: Runners, runner: FakeRunner) -> Srv {
+    let dir = cfg.data_dir.clone();
     let (state, app) = build(cfg, runners).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -425,7 +436,7 @@ async fn auth_flow() {
     // The seeded demo workspace.
     let snap = srv.snapshot(&owner).await;
     assert_eq!(snap.tabs.len(), 3);
-    assert_eq!(snap.agents.len(), 6);
+    assert_eq!(snap.agents.len(), 7); // 6 bobas + the built-in Concierge
     assert_eq!(snap.tickets.len(), 8);
     assert!(snap.skills.iter().any(|s| s.name == "review"));
     assert_eq!(snap.settings.name, "Test Tea");
@@ -2832,4 +2843,434 @@ async fn read_only_runs_only_get_read_tools() {
         err && msg.as_str().unwrap_or("").contains("read-only"),
         "{r}"
     );
+}
+
+// ---------------------------------------------------------------- concierge
+
+async fn user_ws(srv: &Srv, email: &str, password: &str) -> RunnerWs {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let res = reqwest::Client::new()
+        .post(format!("{}/auth/login", srv.base))
+        .json(&json!({"email": email, "password": password}))
+        .send()
+        .await
+        .unwrap();
+    let cookie = res.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let url = srv.base.replace("http://", "ws://") + "/ws";
+    let mut req = url.as_str().into_client_request().unwrap();
+    req.headers_mut().insert("cookie", cookie.parse().unwrap());
+    tokio_tungstenite::connect_async(req).await.unwrap().0
+}
+
+/// Wait for a frame of `type`, or None after `secs`.
+async fn ws_find(ws: &mut RunnerWs, ty: &str, secs: u64) -> Option<Value> {
+    use tokio_tungstenite::tungstenite::Message;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(left, ws.next()).await {
+            Ok(Some(Ok(Message::Text(t)))) => {
+                let v: Value = serde_json::from_str(t.as_str()).unwrap();
+                if v["type"] == ty {
+                    return Some(v);
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            _ => return None,
+        }
+    }
+}
+
+#[tokio::test]
+async fn concierge_plans_for_the_asker_and_executes_with_their_rights() {
+    let srv = start().await;
+    let owner = srv.owner().await;
+    let member = srv.invite(&owner, "m@test.io", "member").await;
+    let snap = srv.snapshot(&owner).await;
+    let tab = snap.tabs[0].id;
+    let concierge = agent(&snap, "Concierge").id;
+    srv.runner.script.lock().unwrap().plan = Some(json!({
+        "reply": "Sure! Here's the plan.",
+        "actions": [
+            {"label": "Create ticket \"Fix login\"", "action": {"action": "create_ticket",
+                "ticket": {"tab_id": tab, "title": "Fix login", "body": null, "tags": ["bug"], "priority": "high",
+                           "color": null, "repo_id": null, "column_id": null}}},
+            {"label": "Hire a designer", "action": {"action": "create_agent", "agent": {"name": "Designer",
+                "role": "Design", "sprite": "pinky_boba", "color": null, "tagline": null, "system_prompt": "",
+                "skill_ids": [], "model": null, "permission_mode": null, "allowed_tools": null, "max_turns": null,
+                "connector_ids": null, "board_tools": null}}},
+            {"label": "nonsense", "action": {"action": "launch_rockets"}}
+        ],
+        "question": null
+    }));
+    let mut member_ws = user_ws(&srv, "m@test.io", "password123").await;
+    let mut owner_ws = user_ws(&srv, "owner@test.io", "correct horse").await;
+
+    let (s, run) = srv
+        .post(
+            &member,
+            "/command",
+            json!({"text": "file a ticket for the login bug and hire a designer",
+            "tab_id": tab, "ticket_id": null, "agent_id": null, "voice": true}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{run}");
+    assert_eq!(
+        (run["kind"].clone(), run["agent_id"].clone()),
+        (json!("command"), json!(concierge))
+    );
+
+    // The plan reaches the asker only, with permissions marked for them.
+    let plan = ws_find(&mut member_ws, "command_plan", 10)
+        .await
+        .expect("plan for the asker")["plan"]
+        .clone();
+    assert_eq!(plan["reply"], "Sure! Here's the plan.");
+    let actions = plan["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 2, "unknown actions are dropped");
+    assert_eq!(
+        (
+            actions[0]["allowed"].clone(),
+            actions[0]["required"].clone()
+        ),
+        (json!(true), json!("edit_tickets"))
+    );
+    assert_eq!(
+        (
+            actions[1]["allowed"].clone(),
+            actions[1]["required"].clone()
+        ),
+        (json!(false), json!("manage_agents"))
+    );
+    assert!(
+        ws_find(&mut owner_ws, "command_plan", 1).await.is_none(),
+        "someone else's plan leaked"
+    );
+
+    // The run was read-only and carried the digest + context.
+    let spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.kind == RunKind::Command)
+        .unwrap();
+    assert_eq!(spec.agent.permission_mode, PermissionMode::Plan);
+    let cmd = spec.command.unwrap();
+    assert!(cmd.voice && cmd.user_name == "m@test.io" && cmd.tab_id == Some(tab));
+    assert!(cmd.board_digest["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|a| a["name"] == "Pinky SEO"));
+    assert!(spec.ticket.is_none() && spec.mcp_servers.is_empty());
+
+    // Execute: the member's own rights apply, the plan runs once, only for its owner.
+    let run_id = run["id"].clone();
+    let exec = json!({"run_id": run_id, "actions": [actions[0]["action"], actions[1]["action"]]});
+    assert_eq!(
+        srv.post(&owner, "/command/execute", exec.clone()).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (s, results) = srv.post(&member, "/command/execute", exec.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{results}");
+    assert_eq!(results[0]["ok"], true);
+    assert_eq!(results[0]["entity"]["entity"], "ticket");
+    assert_eq!(results[1]["ok"], false);
+    assert_eq!(
+        srv.post(&member, "/command/execute", exec).await.0,
+        StatusCode::CONFLICT
+    );
+    let snap = srv.snapshot(&owner).await;
+    assert!(snap
+        .tickets
+        .iter()
+        .any(|t| t.title == "Fix login" && t.priority == Priority::High));
+    assert!(!snap.agents.iter().any(|a| a.name == "Designer"));
+    let kinds: Vec<String> = snap
+        .history
+        .iter()
+        .map(|e| boba_server::db::enc(&e.kind))
+        .collect();
+    assert!(
+        kinds.contains(&"command_issued".to_string())
+            && kinds.contains(&"command_executed".to_string())
+    );
+
+    // The Concierge is built in.
+    assert_eq!(
+        srv.req(&owner, "DELETE", &format!("/agents/{concierge}"), None)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+}
+
+// ---------------------------------------------------------------- GitHub repo sync
+
+#[derive(Default)]
+struct MockGh {
+    issues: Vec<Value>,
+    pulls: Vec<Value>,
+    /// (method + path, body) of every write.
+    writes: Vec<(String, Value)>,
+}
+
+type Gh = Arc<Mutex<MockGh>>;
+
+fn gh_issue(n: i64, title: &str) -> Value {
+    json!({"number": n, "title": title, "body": "From GitHub", "html_url": format!("https://github.com/acme/app/issues/{n}"),
+           "user": {"login": "octo"}, "labels": [{"name": "bug"}], "state": "open",
+           "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-01T00:00:00Z"})
+}
+
+fn gh_pull(n: i64, title: &str, draft: bool) -> Value {
+    json!({"number": n, "title": title, "body": "A contribution", "html_url": format!("https://github.com/acme/app/pull/{n}"),
+           "user": {"login": "contributor"}, "labels": [], "state": "open", "draft": draft,
+           "head": {"ref": format!("feature-{n}"), "sha": "abc", "repo": {"full_name": "contributor/app"}},
+           "base": {"ref": "main", "sha": "def", "repo": {"full_name": "acme/app"}},
+           "merged_at": null, "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-01T00:00:00Z"})
+}
+
+async fn mock_github(gh: Gh) -> String {
+    use axum::extract::{Path as P, State as S};
+    use axum::routing::{get, post};
+    let app =
+        axum::Router::new()
+            .route(
+                "/repos/acme/app/issues",
+                get(|S(g): S<Gh>| async move {
+                    axum::Json(Value::Array(g.lock().unwrap().issues.clone()))
+                }),
+            )
+            .route(
+                "/repos/acme/app/pulls",
+                get(|S(g): S<Gh>| async move {
+                    axum::Json(Value::Array(g.lock().unwrap().pulls.clone()))
+                }),
+            )
+            .route(
+                "/repos/acme/app/issues/{n}/comments",
+                post(
+                    |S(g): S<Gh>, P(n): P<i64>, axum::Json(b): axum::Json<Value>| async move {
+                        g.lock().unwrap().writes.push((format!("comment #{n}"), b));
+                        axum::Json(json!({"id": 1, "html_url": "https://github.com/x"}))
+                    },
+                ),
+            )
+            .route(
+                "/repos/acme/app/pulls/{n}/reviews",
+                post(
+                    |S(g): S<Gh>, P(n): P<i64>, axum::Json(b): axum::Json<Value>| async move {
+                        let event = b["event"].as_str().unwrap_or("").to_string();
+                        g.lock()
+                            .unwrap()
+                            .writes
+                            .push((format!("review #{n} {event}"), b));
+                        if event == "COMMENT" {
+                            (
+                                axum::http::StatusCode::OK,
+                                axum::Json(json!({"id": 2, "html_url": "https://github.com/y"})),
+                            )
+                        } else {
+                            // The token's user "authored" the PR: GitHub refuses approve / request changes.
+                            (
+                                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                                axum::Json(
+                                    json!({"message": "Can not approve your own pull request"}),
+                                ),
+                            )
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/repos/acme/app/issues/{n}",
+                axum::routing::patch(
+                    |S(g): S<Gh>, P(n): P<i64>, axum::Json(b): axum::Json<Value>| async move {
+                        g.lock().unwrap().writes.push((format!("patch #{n}"), b));
+                        axum::Json(json!({}))
+                    },
+                ),
+            )
+            .with_state(gh);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+async fn wait_writes(gh: &Gh, what: &str) -> Vec<(String, Value)> {
+    for _ in 0..200 {
+        let w = gh.lock().unwrap().writes.clone();
+        if w.iter().any(|(k, _)| k.starts_with(what)) {
+            return w;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!(
+        "no GitHub write starting with {what}: {:?}",
+        gh.lock().unwrap().writes
+    );
+}
+
+#[tokio::test]
+async fn github_sync_imports_reviews_and_reports_back() {
+    let gh: Gh = Arc::default();
+    {
+        let mut g = gh.lock().unwrap();
+        g.issues = vec![gh_issue(1, "Crash on login")];
+        g.pulls = vec![gh_pull(2, "Add dark mode", false), gh_pull(3, "WIP", true)];
+    }
+    let api = mock_github(gh.clone()).await;
+    let runner = FakeRunner::new();
+    let r: Arc<dyn Runner> = Arc::new(runner.clone());
+    let mut cfg = Config::for_tests(tmp_dir());
+    cfg.github_webhook_secret = Some("hook-secret".into());
+    let srv = start_cfg(cfg, Runners::from(r), runner).await;
+    *srv.state.github.lock().await =
+        Some(boba_github::GitHub::with_api("test-token", &api).unwrap());
+    let owner = srv.owner().await;
+    let snap = srv.snapshot(&owner).await;
+    let tab = snap.tabs[0].id;
+
+    let (_, repo) = srv
+        .post(&owner, "/repos", json!({"name": "app", "path": "/srv/app", "remote_url": "https://github.com/acme/app.git"}))
+        .await;
+    let rid = repo["id"].as_str().unwrap().to_string();
+    let (s, v) = srv
+        .req(&owner, "PATCH", &format!("/repos/{rid}"), Some(json!({"sync": {
+            "enabled": true, "target_tab_id": tab, "import_issues": true, "issue_labels": [], "import_prs": true,
+            "skip_draft_prs": true, "comment_back": true, "post_reviews": true, "close_issues_on_done": true,
+            "poll_minutes": 60, "last_synced_at": null, "last_error": null}})))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    // First sync: one issue to Todo, one PR to the review column (draft skipped).
+    let (s, report) = srv
+        .post(&owner, &format!("/repos/{rid}/sync"), json!({}))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{report}");
+    assert_eq!(
+        (
+            report["imported_issues"].clone(),
+            report["imported_prs"].clone()
+        ),
+        (json!(1), json!(1))
+    );
+    let snap = srv.snapshot(&owner).await;
+    let issue_t = snap
+        .tickets
+        .iter()
+        .find(|t| t.title == "Crash on login")
+        .unwrap()
+        .clone();
+    let pr_t = snap
+        .tickets
+        .iter()
+        .find(|t| t.title == "Add dark mode")
+        .unwrap()
+        .clone();
+    assert_eq!(column_kind(&snap, &issue_t), ColumnKind::Todo);
+    assert_eq!(issue_t.tags, vec!["bug".to_string()]);
+    assert!(matches!(
+        issue_t.source,
+        boba_core::automation::TicketSource::GithubIssue { number: 1, .. }
+    ));
+    assert_eq!(
+        (pr_t.pr_number, pr_t.branch.as_deref()),
+        (Some(2), Some("feature-2"))
+    );
+    assert!(snap.repos[0].sync.last_synced_at.is_some());
+
+    // The imported PR is auto reviewed; the verdict goes back as a review (422 -> comment).
+    srv.until(&owner, "pr reviewed", |s| {
+        column_kind(s, ticket(s, pr_t.id)) == ColumnKind::Done && all_idle(s)
+    })
+    .await;
+    let w = wait_writes(&gh, "review #2 COMMENT").await;
+    assert!(w.iter().any(|(k, _)| k == "review #2 APPROVE"), "{w:?}");
+    let review_spec = srv
+        .runner
+        .specs()
+        .into_iter()
+        .find(|s| s.kind == RunKind::Review)
+        .unwrap();
+    assert!(matches!(
+        review_spec.ticket.unwrap().source,
+        boba_core::automation::TicketSource::GithubPr { .. }
+    ));
+
+    // Idempotent; title edits upstream flow in.
+    gh.lock().unwrap().issues = vec![gh_issue(1, "Crash on login (Safari)")];
+    let (_, report) = srv
+        .post(&owner, &format!("/repos/{rid}/sync"), json!({}))
+        .await;
+    assert_eq!(
+        (
+            report["imported_issues"].clone(),
+            report["imported_prs"].clone(),
+            report["updated"].clone()
+        ),
+        (json!(0), json!(0), json!(1))
+    );
+    assert_eq!(
+        ticket(&srv.snapshot(&owner).await, issue_t.id).title,
+        "Crash on login (Safari)"
+    );
+
+    // Work on the issue: summary comment back, and the issue is closed once it is Done.
+    let dev = agent(&snap, "Boba Dev").id;
+    srv.post(
+        &owner,
+        &format!("/tickets/{}/assign", issue_t.id),
+        json!({"agent_id": dev}),
+    )
+    .await;
+    srv.until(&owner, "issue done", |s| {
+        column_kind(s, ticket(s, issue_t.id)) == ColumnKind::Done && all_idle(s)
+    })
+    .await;
+    wait_writes(&gh, "comment #1").await;
+    let w = wait_writes(&gh, "patch #1").await;
+    let close = w.iter().find(|(k, _)| k == "patch #1").unwrap();
+    assert_eq!(
+        (close.1["state"].clone(), close.1["state_reason"].clone()),
+        (json!("closed"), json!("completed"))
+    );
+
+    // Closed upstream -> Done here.
+    gh.lock().unwrap().issues = vec![gh_issue(1, "Crash on login (Safari)"), gh_issue(4, "Typo")];
+    srv.post(&owner, &format!("/repos/{rid}/sync"), json!({}))
+        .await;
+    gh.lock().unwrap().issues = vec![];
+    let (_, report) = srv
+        .post(&owner, &format!("/repos/{rid}/sync"), json!({}))
+        .await;
+    assert_eq!(report["closed"], 1);
+    let snap = srv.snapshot(&owner).await;
+    let typo = snap.tickets.iter().find(|t| t.title == "Typo").unwrap();
+    assert_eq!(column_kind(&snap, typo), ColumnKind::Done);
+
+    // Webhook: bad signature 401, good one 200 (and triggers a sync).
+    let body = br#"{"zen": "Keep it logically awesome."}"#;
+    let post = |sig: String| {
+        reqwest::Client::new()
+            .post(format!("{}/github/webhook", srv.base))
+            .header("x-github-event", "ping")
+            .header("x-hub-signature-256", sig)
+            .body(body.to_vec())
+            .send()
+    };
+    assert_eq!(
+        post("sha256=00".into()).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let good = boba_github::webhook::sign(b"hook-secret", body);
+    assert_eq!(post(good).await.unwrap().status(), StatusCode::OK);
 }

@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod board_tools;
 pub mod comments;
+pub mod concierge;
 pub mod config;
 pub mod connectors;
 pub mod db;
@@ -23,6 +24,7 @@ pub mod seed;
 pub mod skills;
 pub mod speech;
 pub mod state;
+pub mod sync;
 pub mod web;
 pub mod ws;
 
@@ -48,7 +50,9 @@ pub async fn build(
         tracing::warn!(error = ?e, "initial skill scan failed");
     }
     orchestrator::recover(&state).await?;
+    concierge::ensure(&state).await?;
     scheduler::spawn(state.clone());
+    sync::spawn_poller(state.clone());
     let router = router(state.clone());
     Ok((state, router))
 }

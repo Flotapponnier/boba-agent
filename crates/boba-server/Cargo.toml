@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 boba-core.workspace = true
 boba-runner.workspace = true
+boba-github.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true

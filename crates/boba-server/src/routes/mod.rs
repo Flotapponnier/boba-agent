@@ -1,9 +1,9 @@
 //! HTTP routes (see docs/API.md).
 
-mod auth;
-mod board;
-mod team;
-mod work;
+pub mod auth;
+pub mod board;
+pub mod team;
+pub mod work;
 
 use axum::routing::{get, patch, post};
 use axum::Router;
@@ -63,6 +63,10 @@ pub fn api() -> Router<SharedState> {
         )
         .route("/health", get(|| async { "ok" }))
         .route("/mcp", post(crate::board_tools::endpoint))
+        .route("/repos/{id}/sync", post(crate::sync::sync_now))
+        .route("/github/webhook", post(crate::sync::webhook))
+        .route("/command", post(crate::concierge::command))
+        .route("/command/execute", post(crate::concierge::execute))
         // quests
         .route("/jobs", post(crate::jobs::create))
         .route("/jobs/preview-schedule", post(crate::jobs::preview))

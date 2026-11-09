@@ -203,6 +203,11 @@ pub async fn delete_agent(
         .agent(id)
         .await?
         .ok_or(AppError::NotFound("agent"))?;
+    if crate::concierge::concierge_id(&state).await? == Some(id) {
+        return Err(AppError::conflict(
+            "the Concierge is built in and cannot be removed",
+        ));
+    }
     if a.status != AgentStatus::Idle || a.current_run_id.is_some() {
         return Err(AppError::conflict(format!(
             "{} is working; cancel the run first",
@@ -435,6 +440,9 @@ pub async fn move_ticket(
             .await;
         if to.kind == ColumnKind::Review {
             orchestrator::maybe_auto_review_locked(&state, t.id).await;
+        }
+        if to.kind == ColumnKind::Done {
+            crate::sync::ticket_done(&state, t.clone());
         }
     }
     Ok(Json(state.db.ticket(id).await?.unwrap_or(t)))
