@@ -40,6 +40,9 @@ rust-embed = { version = "8", features = ["mime-guess"] }
 mime_guess = "2"
 futures = "0.3"
 time = "0.3"
+aes-gcm = "0.10"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies"] }

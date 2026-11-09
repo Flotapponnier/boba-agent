@@ -59,4 +59,16 @@ pub fn api() -> Router<SharedState> {
         .route("/repos", post(board::create_repo))
         .route("/repos/{id}", axum::routing::delete(board::delete_repo))
         .route("/health", get(|| async { "ok" }))
+        // connectors & speech (coordinator workstream)
+        .route("/connectors", post(crate::connectors::create))
+        .route(
+            "/connectors/{id}",
+            patch(crate::connectors::update).delete(crate::connectors::delete),
+        )
+        .route("/connectors/{id}/test", post(crate::connectors::test))
+        .route(
+            "/speech/transcribe",
+            post(crate::speech::transcribe)
+                .layer(axum::extract::DefaultBodyLimit::max(crate::speech::MAX_AUDIO_BYTES)),
+        )
 }
