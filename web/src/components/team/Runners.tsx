@@ -11,6 +11,47 @@ import { useBoard } from '../../store/store';
 import { Modal } from '../ui/Overlay';
 import { UNAVAILABLE, useAvailable, useFeatures } from '../../store/features';
 
+export const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/Flotapponnier/boba-agent/main/install.sh | sh';
+export const RUNNER_DOCS = 'https://github.com/Flotapponnier/boba-agent/blob/main/docs/RUNNER.md';
+
+function Copyable({ text, label }: { text: string; label: string }) {
+  return (
+    <div className="copyable">
+      <pre className="cmd-snippet">{text}</pre>
+      <button className="btn sm" onClick={() => void navigator.clipboard?.writeText(text).then(() => toast(`${label} copied`, 'good'))}>
+        📋 Copy
+      </button>
+    </div>
+  );
+}
+
+/** The three steps from docs/RUNNER.md, shown before and after the token. */
+function InstallSteps({ personal }: { personal: boolean }) {
+  return (
+    <ol className="install-steps">
+      <li>
+        <b>Install boba-agent</b> (macOS / Linux, checksum-verified):
+        <Copyable text={INSTALL_CMD} label="Install command" />
+      </li>
+      <li>
+        <b>{personal ? 'Sign in to Claude Code' : 'Give it organisation credentials'}</b>
+        {personal ? (
+          <>
+            : <code>claude auth login</code>, then check <code>claude auth status</code>. For pull requests: <code>gh auth login</code>.
+          </>
+        ) : (
+          <>
+            : <code>ANTHROPIC_API_KEY</code> (or Bedrock / Vertex), plus <code>gh auth login</code> or <code>GH_TOKEN</code>.
+          </>
+        )}
+      </li>
+      <li>
+        <b>Connect</b> with the command below (the token is shown once).
+      </li>
+    </ol>
+  );
+}
+
 const AUTH: Record<RunnerAuth, { label: string; tone: string }> = {
   api_key: { label: 'API key', tone: 'ok' },
   bedrock: { label: 'Bedrock', tone: 'ok' },
@@ -110,6 +151,7 @@ function ConnectModal({ scope, onClose }: { scope: RunnerScope; onClose: () => v
               A shared runner takes anyone's runs, quests and auto reviews. It must use an organisation <b>API key</b>, <b>Bedrock</b> or <b>Vertex</b>. A shared runner logged in with a personal subscription is refused.
             </p>
           )}
+          <InstallSteps personal={scope === 'personal'} />
           <label className="field">
             <span className="label">Name</span>
             <input autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={40} />
@@ -132,13 +174,16 @@ function ConnectModal({ scope, onClose }: { scope: RunnerScope; onClose: () => v
           <p>
             Run this on the machine{scope === 'personal' ? ' where you are logged in to Claude Code' : ''}. <b>The token is shown only once.</b>
           </p>
-          <pre className="cmd-snippet">{token.command}</pre>
-          <div className="row">
-            <button className="btn sm gold" onClick={() => void navigator.clipboard?.writeText(token.command).then(() => toast('Command copied', 'good'))}>
-              📋 Copy command
-            </button>
-            <span className="hint-text">It connects out over WebSocket, so it works behind a NAT or a laptop firewall.</span>
-          </div>
+          <p className="hint-text">1. Install (if not done yet):</p>
+          <Copyable text={INSTALL_CMD} label="Install command" />
+          <p className="hint-text">2. Connect this machine:</p>
+          <Copyable text={token.command} label="Connect command" />
+          <p className="hint-text">
+            It connects out over WebSocket, so it works behind a NAT or a laptop firewall. Full guide:{' '}
+            <a href={RUNNER_DOCS} target="_blank" rel="noreferrer noopener">
+              docs/RUNNER.md ↗
+            </a>
+          </p>
           <div className="row end" style={{ marginTop: 12 }}>
             <button className="btn gold" onClick={onClose}>
               Done
@@ -184,6 +229,14 @@ export function RunnersPage() {
         </div>
       </div>
       <div className="runner-explain sheet">
+        <div style={{ gridColumn: '1 / -1' }} className="row between">
+          <span className="hint-text">
+            New here? Install with <code>curl … install.sh | sh</code>, sign in to Claude Code, then Connect my machine.
+          </span>
+          <a className="btn sm" href={RUNNER_DOCS} target="_blank" rel="noreferrer noopener">
+            📖 Runner guide
+          </a>
+        </div>
         <div>
           <b>🧋 Personal</b>
           <p>Your laptop, your Claude login. Runs only what you start. Your subscription is never shared.</p>

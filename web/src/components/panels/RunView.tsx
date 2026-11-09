@@ -382,7 +382,7 @@ export function RunView({
           {agent && <Sprite sprite={agent.sprite} color={agent.color} status={active ? agent.status : 'idle'} size={40} />}
           <div className="grow">
             <b className="label">
-              {agent?.name ?? 'Agent'} · {run.kind === 'review' ? 'Review' : 'Work'}
+              {agent?.name ?? 'Agent'} · {run.kind === 'review' ? 'Review' : run.kind === 'job' ? 'Quest' : run.kind === 'command' ? 'Concierge' : 'Work'}
             </b>
             <div className="hint-text">{run.activity ?? (active ? 'Starting…' : run.summary ?? '')}</div>
           </div>

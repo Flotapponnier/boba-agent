@@ -192,7 +192,7 @@ export function QuestPanel({ jobId }: { jobId: string }) {
   }, [jobId]);
   const runs = useMemo(() => Object.values(runsMap).filter((r): r is Run => r.job_id === jobId).sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [runsMap, jobId]);
   if (!j) return null;
-  const run = runs.find((r) => r.id === sel) ?? runs.find(isActive);
+  const run = runs.find((r) => r.id === sel) ?? runs.find(isActive) ?? runs[0];
 
   return (
     <Drawer title={`${j.icon} ${j.name.toUpperCase()}`} onClose={() => ui.open(null)}>

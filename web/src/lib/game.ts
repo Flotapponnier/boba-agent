@@ -100,6 +100,9 @@ export function commandPattern(command: string): string | null {
   return `Bash(${head}:*)`;
 }
 
+/** The built-in Concierge (role "Concierge") lives in Snapshot.agents but is not a draggable boba. */
+export const isConcierge = (a: { role: string } | null | undefined) => !!a && a.role.trim().toLowerCase() === 'concierge';
+
 export const SWATCHES = ['#f39c12', '#e74c3c', '#ff6fb5', '#9b59b6', '#3498db', '#1abc9c', '#2ecc71', '#ffd23f', '#8b4513', '#34495e'];
 
 /** Stable pseudo-random rotation in [-2, 2] degrees for a ticket "paper". */

@@ -9,7 +9,7 @@ import { speak, startVoice, voiceSupport, type VoiceSession } from '../../lib/vo
 import { errorText } from '../../store/actions';
 import { fxBus, planBus, toast } from '../../store/bus';
 import { usePrefs } from '../../store/prefs';
-import { useAgentsList, useTabs } from '../../store/selectors';
+import { useAgentsList, useConcierge, useTabs } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { useUi, type Modal, type View } from '../../store/ui';
 import { UNAVAILABLE, useAvailable, useFeatures } from '../../store/features';
@@ -216,6 +216,9 @@ export function CommandBar() {
   const speech = useBoard((s) => s.settings?.speech);
   const quick = useQuickActions();
   const conciergeOk = useAvailable('command');
+  const concierge = useConcierge();
+  const speaker = concierge?.sprite ?? CONCIERGE;
+  const speakerName = concierge?.name ?? 'The Concierge';
   const [phase, setPhase] = useState<Phase>({ k: 'input' });
   const [text, setText] = useState('');
   const [sel, setSel] = useState(0);
@@ -406,7 +409,7 @@ export function CommandBar() {
       res.filter((r) => !r.ok).forEach((r) => toast(r.error ?? 'An action failed', 'bad'));
       if (ok) {
         sfx('done', 0.6);
-        toast(`Done! ${ok} action${ok > 1 ? 's' : ''} carried out ✨`, 'gold', CONCIERGE);
+        toast(`Done! ${ok} action${ok > 1 ? 's' : ''} carried out ✨`, 'gold', speaker);
       }
       close();
       focusResults(res);
@@ -441,7 +444,7 @@ export function CommandBar() {
           >
             <div className="cmd-head">
               <span className={`concierge ${phase.k}`}>
-                <img src={bodyUrl(CONCIERGE)} alt="" />
+                <img src={bodyUrl(speaker)} alt={speakerName} title={speakerName} />
                 {phase.k === 'listening' && <span className="rings" />}
               </span>
               {phase.k === 'input' || phase.k === 'listening' ? (
@@ -530,13 +533,17 @@ export function CommandBar() {
                   <i />
                   <i />
                 </span>
-                <span>{thinkingRun?.activity ?? 'The Concierge is reading the board…'}</span>
+                <span>{thinkingRun?.activity ?? `${speakerName} is reading the board…`}</span>
               </div>
             )}
 
             {(phase.k === 'plan' || phase.k === 'executing') && (
               <div className="cmd-body">
-                {phase.plan.reply && <p className="cmd-reply">{phase.plan.reply}</p>}
+                {phase.plan.reply && (
+                  <p className="cmd-reply">
+                    <b>{speakerName}:</b> {phase.plan.reply}
+                  </p>
+                )}
                 {phase.plan.question && (
                   <form
                     className="cmd-question"
