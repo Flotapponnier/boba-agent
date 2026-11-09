@@ -1616,6 +1616,21 @@ class MockServer implements Transport {
     let x: RegExpMatchArray | null;
     const key = `${method} ${path}`;
 
+    if (key === 'GET /api/github/app/manifest') {
+      this.need('manage_automations');
+      const org = q.get('org');
+      return {
+        name: q.get('name') || 'Boba Agent',
+        action_url: `https://github.com/${org ? `organizations/${org}/` : ''}settings/apps/new?state=demo`,
+        manifest: {
+          name: q.get('name') || 'Boba Agent',
+          url: location.origin,
+          default_permissions: { contents: 'write', issues: 'write', pull_requests: 'write', checks: 'write', metadata: 'read' },
+          default_events: ['issues', 'issue_comment', 'pull_request', 'pull_request_review'],
+        },
+        warnings: ['Demo mode: nothing is sent to GitHub.'],
+      };
+    }
     if (key === 'GET /api/github/app') {
       this.need('view');
       return this.s.github ?? { configured: false, slug: null, app_id: null, html_url: null, install_url: null, installations: [] };

@@ -20,6 +20,7 @@ export type Modal =
   | { kind: 'portal-new'; preset?: string }
   | { kind: 'portal-edit'; id: string }
   | { kind: 'repo-new' }
+  | { kind: 'github-setup'; org?: string; name?: string }
   | { kind: 'profile' }
   | { kind: 'members' };
 

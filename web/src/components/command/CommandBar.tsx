@@ -4,7 +4,7 @@ import { api } from '../../api/client';
 import type { ActionResult, CommandAction, CommandPlan, Permission, PlannedAction, Priority } from '../../api/types';
 import { sfx } from '../../audio/audio';
 import { PRIORITIES, PRIORITY_LABEL, bodyUrl } from '../../lib/game';
-import { describe } from '../../lib/schedule';
+import { describe, localTz } from '../../lib/schedule';
 import { speak, startVoice, voiceSupport, type VoiceSession } from '../../lib/voice';
 import { errorText } from '../../store/actions';
 import { fxBus, planBus, toast } from '../../store/bus';
@@ -263,6 +263,8 @@ export function CommandBar() {
         ticket_id: panel?.kind === 'ticket' ? panel.id : null,
         agent_id: panel?.kind === 'agent' ? panel.id : null,
         voice: isVoice,
+        // So "at 9" means 9 o'clock for the person speaking.
+        timezone: localTz(),
       });
       useBoard.getState().upsert({ entity: 'run', data: run });
       setPhase((p) => (p.k === 'thinking' ? { k: 'thinking', runId: run.id } : p));

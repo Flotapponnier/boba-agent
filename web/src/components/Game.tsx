@@ -42,6 +42,7 @@ import { SkillsDrawer } from './panels/SkillsDrawer';
 import { TicketPanel } from './panels/TicketPanel';
 import { Tavern } from './tavern/Tavern';
 import { handleGithubReturn } from './integrations/GithubCard';
+import { GithubSetup, githubSetupFromUrl } from './integrations/GithubSetup';
 import { MembersModal, ProfileModal } from './team/Account';
 import { RunnersPage } from './team/Runners';
 import { CommandBar } from './command/CommandBar';
@@ -101,7 +102,14 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
 
   // Back from GitHub's app setup / install pages.
   useEffect(() => {
-    if (!ready || !handleGithubReturn()) return;
+    if (!ready) return;
+    const setup = githubSetupFromUrl();
+    if (setup) {
+      ui.setView('integrations');
+      ui.show({ kind: 'github-setup', ...setup });
+      return;
+    }
+    if (!handleGithubReturn()) return;
     ui.setView('integrations');
     toast('Welcome back from GitHub 🐙 The app is set up: add a repo below.', 'gold');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -337,6 +345,7 @@ export function Game({ onLoggedOut }: { onLoggedOut: () => Promise<void> }) {
       {modal?.kind === 'quest-edit' && <QuestEditor jobId={modal.id} />}
       {modal?.kind === 'portal-new' && <PortalEditor presetKind={modal.preset} />}
       {modal?.kind === 'portal-edit' && <PortalEditor connectorId={modal.id} />}
+      {modal?.kind === 'github-setup' && <GithubSetup org={modal.org} name={modal.name} />}
       {modal?.kind === 'profile' && <ProfileModal />}
       {modal?.kind === 'members' && <MembersModal />}
       <CommandBar />

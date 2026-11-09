@@ -716,3 +716,59 @@
   font-size: 16px;
   color: var(--ink-soft);
 }
+.gh-setup-page {
+  font-size: 18px;
+  display: grid;
+  gap: 8px;
+}
+.gh-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.gh-hero img {
+  width: 84px;
+  animation: bob 1.6s ease-in-out infinite;
+}
+.gh-plus {
+  font-family: var(--pixel);
+  font-size: 18px;
+  color: var(--label);
+}
+.gh-octo-big {
+  font-size: 64px;
+  animation: bob 1.6s ease-in-out infinite;
+  animation-delay: -0.8s;
+}
+.gh-warning {
+  background: #fff3c4;
+  border: 2px dashed var(--gold-dark);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 17px;
+}
+.gh-perms {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+.perm-level {
+  display: inline-block;
+  min-width: 48px;
+  text-align: center;
+  font-family: var(--pixel);
+  font-size: 7px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  color: #fff;
+  background: #7f8c8d;
+  text-transform: uppercase;
+}
+.perm-level.write {
+  background: #c97a1b;
+}
+.perm-level.read {
+  background: #2f6d9c;
+}

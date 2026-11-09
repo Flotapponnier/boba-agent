@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 
 /** Server features that may not exist yet on an older/partial server (route missing → 404 "no such endpoint" or 501). */
-export type Feature = 'github' | 'jobs' | 'command' | 'comments' | 'connectors' | 'sync' | 'runners' | 'notifications' | 'profile' | 'speech' | 'skills' | 'repos';
+export type Feature = 'github-manifest' | 'github' | 'jobs' | 'command' | 'comments' | 'connectors' | 'sync' | 'runners' | 'notifications' | 'profile' | 'speech' | 'skills' | 'repos';
 
 const RULES: [RegExp, Feature][] = [
+  [/^\/api\/github\/app\/manifest/, 'github-manifest'],
   [/^\/api\/github/, 'github'],
   [/^\/api\/jobs/, 'jobs'],
   [/^\/api\/command/, 'command'],

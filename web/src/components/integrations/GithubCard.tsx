@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, getTransport } from '../../api/client';
+import { api } from '../../api/client';
 import type { GithubAppStatus, GithubRepo, Repo } from '../../api/types';
 import { sfx } from '../../audio/audio';
 import { attempt } from '../../store/actions';
@@ -8,6 +8,7 @@ import { UNAVAILABLE, useAvailable, useFeatures } from '../../store/features';
 import { useCan, useTabs } from '../../store/selectors';
 import { useBoard } from '../../store/store';
 import { Modal } from '../ui/Overlay';
+import { useUi } from '../../store/ui';
 
 /** GitHub sends people back to /settings/integrations after creating / installing the app. */
 export function handleGithubReturn(): boolean {
@@ -17,16 +18,8 @@ export function handleGithubReturn(): boolean {
 }
 
 function startSetup(org: string, name: string) {
-  if (getTransport().mock) {
-    // No real GitHub in the demo: pretend the round trip happened.
-    void import('../../mock/server').then(({ mockServer }) => {
-      mockServer.githubSetup(org.trim() || 'boba-labs');
-      toast('GitHub App created and installed (demo) 🐙', 'gold');
-      window.dispatchEvent(new Event('boba:github-changed'));
-    });
-    return;
-  }
-  location.href = api.githubSetupUrl(org.trim() || undefined, name.trim() || undefined);
+  // Game-styled confirm page; it fetches the manifest (fresh single-use state) when it opens.
+  useUi.getState().show({ kind: 'github-setup', org: org.trim() || undefined, name: name.trim() || undefined });
 }
 
 function RepoPicker({ onClose }: { onClose: () => void }) {
