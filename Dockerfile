@@ -4,7 +4,7 @@
 # ---- web UI
 FROM node:22-bookworm-slim AS web
 WORKDIR /src/web
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@10.34.5 --activate
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
