@@ -31,18 +31,20 @@ const RepoCard = memo(function RepoCard({ repo }: { repo: Repo }) {
   const canRun = useCan('run_agents');
   const imported = useBoard((s) => Object.values(s.tickets).filter((t) => (t.source.kind === 'github_issue' || t.source.kind === 'github_pr') && t.source.repo_id === repo.id).length);
   const [sync, setSync] = useState<RepoSync>(repo.sync);
+  const [attribution, setAttribution] = useState(repo.ai_attribution);
   const [labelIn, setLabelIn] = useState('');
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const avail = useAvailable('sync');
-  const dirty = JSON.stringify({ ...sync, last_synced_at: null, last_error: null }) !== JSON.stringify({ ...repo.sync, last_synced_at: null, last_error: null });
+  const dirty =
+    attribution !== repo.ai_attribution || JSON.stringify({ ...sync, last_synced_at: null, last_error: null }) !== JSON.stringify({ ...repo.sync, last_synced_at: null, last_error: null });
   useEffect(() => setSync((s) => ({ ...s, last_synced_at: repo.sync.last_synced_at, last_error: repo.sync.last_error })), [repo.sync.last_synced_at, repo.sync.last_error]);
   const set = <K extends keyof RepoSync>(k: K, v: RepoSync[K]) => setSync((s) => ({ ...s, [k]: v }));
   const ro = !canManage;
 
   const save = async () => {
     setBusy(true);
-    const r = await attempt(() => api.updateRepo(repo.id, { sync }));
+    const r = await attempt(() => api.updateRepo(repo.id, { sync, ai_attribution: attribution }));
     setBusy(false);
     if (r) {
       useBoard.getState().upsert({ entity: 'repo', data: r });
@@ -129,6 +131,12 @@ const RepoCard = memo(function RepoCard({ repo }: { repo: Repo }) {
         <Toggle checked={sync.comment_back} onChange={(v) => set('comment_back', v)} label="Comment back on GitHub" hint="Run summaries and verdicts as comments" />
         <Toggle checked={sync.post_reviews} onChange={(v) => set('post_reviews', v)} label="Post real PR reviews" hint="Approve / request changes as the bot account" />
         <Toggle checked={sync.close_issues_on_done} onChange={(v) => set('close_issues_on_done', v)} label="Close issues when Done" />
+        <Toggle
+          checked={attribution}
+          onChange={setAttribution}
+          label="Allow AI attribution in commits (Co-Authored-By: Claude)"
+          hint="Off: agents' commits and PRs on this repo carry no Claude attribution trailer"
+        />
         <label className="field">
           <span className="label">Poll every (minutes)</span>
           <input type="number" min={1} max={1440} value={sync.poll_minutes} onChange={(e) => set('poll_minutes', Math.max(1, Number(e.target.value) || 10))} style={{ width: 110 }} />
